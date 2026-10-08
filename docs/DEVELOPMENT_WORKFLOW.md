@@ -32,9 +32,33 @@ on another. Every change therefore goes through a short hand-off loop.
 Always run `npm run typecheck` first. A type error is quicker to report and fix than a runtime
 failure.
 
+## Automatic HTML capture
+
+The runner saves the page HTML so selectors can be written and failures diagnosed on the
+development system without OCA access.
+
+- **On failure (always):** the page as it was when the job failed, named `NN-FAILED-<step>.html`.
+- **Every step (optional):** tick **Save page HTML at every step** in the dashboard, or pass
+  `--capture-html` on the command line. One file is saved after each engine step.
+
+Files are written to `<output>/html/<Job ID>/`. For dashboard runs that is
+`.oca-ui\runs\<run id>\output\html\`; the Activity log prints each path on an `[HTML]` line.
+Iframes are saved beside the page as `NN-<step>.frameN.html`.
+
+The saved HTML is not a plain "Save page as": it records typed values, checked and selected
+state, and marks every element that was not rendered with `data-oca-hidden="true"` (its
+descendants are hidden too). Script bodies are removed and password values masked.
+
+**Sharing captures:** zip the `html` folder and copy it to the development system under
+`D:\Projects\Malathi Project\captures\<date>\`, outside this repository. Captures contain customer
+configuration data and can contain session-related hidden fields, so never commit them to Git
+(`captures/`, `output/`, and `.oca-ui/` are ignored). Delete old captures when no longer needed.
+
 ## Sharing HTML for a new step
 
-Selectors are written only from HTML that has been shared. They are never guessed.
+Selectors are written only from HTML that has been shared. They are never guessed. A step
+capture (above) is usually enough; for an element that appears only mid-step, such as an open
+dropdown, copy it manually:
 
 1. In Chrome on the run system, right-click the element and choose **Inspect**.
 2. In DevTools, right-click the highlighted node and choose **Copy → Copy outerHTML**.
@@ -99,3 +123,4 @@ Record each hand-off cycle here: what changed, which files, and the run result.
 |---|---|---|---|
 | 2026-10-08 | Repository created from `PlaywriteTest` (f42ece6 + pending fixes: save-flow recovery, storage flow, solution-wizard drive enclosure, End BOM updates, Excel reader/validator updates). Added this workflow guide and `CLAUDE.md`. | — | Pending first run |
 | 2026-10-08 | Code review fixes for the dashboard flow: runner started with `node --import tsx` instead of `npm.cmd` (Windows EINVAL); Stop uses IPC instead of SIGINT; one active run at a time; models without components keep random selections in mixed runs; Storage flag and component descriptions kept; previous job tabs closed; sign-in status and skipped-job progress fixed. | `src/app/ui-server.ts`, `src/app/run-workbook.ts` (new), `src/main.ts`, `src/automation/oca-engine.ts`, `src/excel/excel-reader.ts`, `src/ui/public/index.html`, `src/ui/public/app.js`, `tests/unit/run-workbook.spec.ts` (new), `README.md` | Pending: typecheck, unit tests, one-model UI run |
+| 2026-10-08 | Automatic HTML capture: always on failure, optionally after every step (`--capture-html` / dashboard checkbox), with live control state and hidden-element marks. | `src/reporting/html-capture.ts` (new), `src/main.ts`, `src/app/cli.ts`, `src/automation/oca-engine.ts`, `src/app/ui-server.ts`, `src/ui/public/index.html`, `src/ui/public/app.js`, `tests/unit/html-capture.spec.ts` (new), `tests/unit/cli.spec.ts`, `.gitignore` | Pending |

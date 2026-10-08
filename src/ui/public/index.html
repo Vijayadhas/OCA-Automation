@@ -15,7 +15,7 @@
       <div class="import-card" id="dropzone"><div class="upload-icon">⇧</div><div><strong>Import an Excel workbook</strong><p>Drop your .xlsx here or choose a file. Jobs remain editable before running.</p></div><label class="button secondary">Choose Excel<input id="fileInput" type="file" accept=".xlsx,.xls" hidden></label></div>
       <div id="notice" class="notice hidden"></div>
       <div class="table-card"><div class="table-title"><div><strong>Model queue</strong><span id="queueMeta">No models added</span></div></div><div class="table-wrap"><table><thead><tr><th>Job ID</th><th>Model number</th><th>Description</th><th>Service</th><th>End BOM</th><th>Enabled</th><th></th></tr></thead><tbody id="jobsBody"><tr class="empty"><td colspan="7">Import a workbook or add your first model</td></tr></tbody></table></div></div>
-      <div class="run-bar"><div class="options"><label><input type="checkbox" id="headless"> Run headless</label><label><input type="checkbox" id="trace"> Capture failure traces</label></div><button class="button primary" id="runButton">Start automation <span>→</span></button></div>
+      <div class="run-bar"><div class="options"><label><input type="checkbox" id="headless"> Run headless</label><label><input type="checkbox" id="trace"> Capture failure traces</label><label><input type="checkbox" id="captureHtml"> Save page HTML at every step</label></div><button class="button primary" id="runButton">Start automation <span>→</span></button></div>
     </section>
 
     <section id="monitor" class="panel-section">

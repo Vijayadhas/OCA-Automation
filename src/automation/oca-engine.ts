@@ -15,8 +15,9 @@ import { ExceptionRegistry } from '../exceptions/exception-registry';
 import type { ServerGeneration } from './model-search';
 import { SolutionWizard } from './solution-wizard';
 import { StorageFlow } from './storage-flow';
+import type { HtmlCapture } from '../reporting/html-capture';
 
-export interface OcaEngineOptions { baseUrl: string; authWaitMs: number; expectedPageText: string; }
+export interface OcaEngineOptions { baseUrl: string; authWaitMs: number; expectedPageText: string; html?: HtmlCapture; }
 
 export async function recoverRequiredMenuSelections(
   page: Page,
@@ -63,6 +64,7 @@ export class OcaEngine {
         integrationRackPartNumber: job.integrationRackPartNumber,
       }));
     this.page = model.page;
+    await this.options.html?.step(this.page, 'Configuration workspace opened');
     this.components = new ComponentEngine(this.activePage, model.family);
     this.currentStep = 'Verify Quotation Mode';
     console.log('[STEP] Verifying aaS quotation mode');
@@ -178,11 +180,11 @@ export class OcaEngine {
 
   private async measure<T>(label: string, action: () => Promise<T>): Promise<T> {
     const startedAt = Date.now();
-    try {
-      return await action();
-    } finally {
+    const result = await action().finally(() => {
       console.log(`[TIME] ${label}: ${this.formatDuration(Date.now() - startedAt)}`);
-    }
+    });
+    await this.options.html?.step(this.page, label);
+    return result;
   }
 
   private formatDuration(milliseconds: number): string {

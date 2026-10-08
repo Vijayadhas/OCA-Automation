@@ -135,6 +135,8 @@ Optional flags:
 - `--job-id <id>` — run one job
 - `--retry-failed` — run only jobs previously recorded as Failed or Unsupported
 - `--trace` — retain Playwright traces for failed jobs
+- `--capture-html` — save page HTML after every step; failed jobs are always saved (see
+  `docs/DEVELOPMENT_WORKFLOW.md`)
 - `--headless` — available for future unattended environments; headed is the default
 
 Manual authentication is allowed once when the shared browser opens. Configure the environment with:
@@ -156,7 +158,7 @@ The CLI creates `<input-name>-results.xlsx` in the output directory, never overw
 It contains `Results` and `Summary` sheets. Each job is flushed immediately. Normal runs execute every enabled job again,
 including previously successful jobs; `--retry-failed` selects only failed or unsupported prior jobs.
 
-Failure artifacts are stored under `output/screenshots`, `output/traces`, and `output/logs`. SIGINT or
+Failure artifacts are stored under `output/screenshots`, `output/html`, `output/traces`, and `output/logs`. SIGINT or
 SIGTERM requests a graceful stop after the current job. One failed job does not stop the remaining batch.
 
 ## Architecture and migration notes

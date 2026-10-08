@@ -9,6 +9,7 @@ export interface CliOptions {
   jobId?: string;
   retryFailed: boolean;
   trace: boolean;
+  captureHtml: boolean;
 }
 
 const valueAfter = (args: string[], flag: string): string | undefined => {
@@ -34,6 +35,7 @@ export function parseCliArgs(args: string[]): CliOptions {
     jobId: valueAfter(args, '--job-id'),
     retryFailed: args.includes('--retry-failed'),
     trace: args.includes('--trace'),
+    captureHtml: args.includes('--capture-html'),
   };
 }
 
@@ -47,4 +49,5 @@ Options:
   --job-id <id>         Process one Job ID
   --retry-failed        Process only failed/unsupported prior results
   --trace               Capture Playwright traces for failed jobs
+  --capture-html        Save page HTML after every step (failed jobs are always saved)
 `;

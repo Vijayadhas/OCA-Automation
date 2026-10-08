@@ -13,6 +13,7 @@ import { createPendingResult } from './models/automation-result';
 import { Logger } from './reporting/logger';
 import { ScreenshotManager } from './reporting/screenshot-manager';
 import { TraceManager } from './reporting/trace-manager';
+import { HtmlCapture } from './reporting/html-capture';
 import { getErrorMessage } from './core/excel';
 
 export async function run(argv = process.argv.slice(2)): Promise<number> {
@@ -28,6 +29,7 @@ export async function run(argv = process.argv.slice(2)): Promise<number> {
   const writer = new ExcelWriter(options.output, options.input);
   const logger = new Logger(options.output);
   const screenshots = new ScreenshotManager(options.output);
+  const html = new HtmlCapture(options.output, options.captureHtml ? 'steps' : 'failure');
   const session = new BrowserSession({
     profilePath: options.profile, headed: options.headed, trace: options.trace,
     actionTimeoutMs: Number(process.env.OCA_ACTION_TIMEOUT_MS ?? 30_000),
@@ -56,7 +58,7 @@ export async function run(argv = process.argv.slice(2)): Promise<number> {
     const context = await session.start();
     const engine = new OcaEngine(context, new ExceptionRegistry([
       new P74787AutomaticDependencyHandler(), new P72221SmartChassisHandler(),
-    ]), { baseUrl: env.baseUrl, authWaitMs: env.authWaitMs, expectedPageText: env.expectedPageText });
+    ]), { baseUrl: env.baseUrl, authWaitMs: env.authWaitMs, expectedPageText: env.expectedPageText, html });
 
     for (let index = 0; index < jobs.length; index += 1) {
       const job = jobs[index];
@@ -74,6 +76,7 @@ export async function run(argv = process.argv.slice(2)): Promise<number> {
       const retryCount = existing ? existing.retryCount + 1 : 0;
       console.log(`[${index + 1}/${jobs.length}] ${job.modelNumber} - Running`);
       logger.info('Job started', { jobId: job.jobId, modelNumber: job.modelNumber, retryCount });
+      html.startJob(job.jobId);
       await traces.start(job.jobId);
       try {
         const result = await engine.processJob(job, retryCount);
@@ -86,7 +89,10 @@ export async function run(argv = process.argv.slice(2)): Promise<number> {
         const result = createPendingResult(job.jobId, job.modelNumber, retryCount);
         result.executionStatus = error instanceof UnsupportedComponentError ? 'Unsupported' : 'Failed';
         result.errorStep = engine.currentStep; result.errorMessage = getErrorMessage(error);
-        result.screenshotPath = await screenshots.capture(engine.activePage, job.jobId).catch(() => '');
+        let failedPage: typeof engine.activePage | undefined;
+        try { failedPage = engine.activePage; } catch { failedPage = undefined; }
+        await html.failure(failedPage, engine.currentStep);
+        result.screenshotPath = failedPage ? await screenshots.capture(failedPage, job.jobId).catch(() => '') : '';
         result.tracePath = await traces.finish(job.jobId, true);
         result.endTime = new Date().toISOString(); result.duration = Date.parse(result.endTime) - Date.parse(result.startTime);
         await writer.writeResult(result);

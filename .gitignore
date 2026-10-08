@@ -8,3 +8,4 @@ playwright-report/
 .oca-profile/
 .oca-ui/
 output/
+captures/

@@ -11,4 +11,6 @@ test('parses CLI filters and trace options', () => {
   expect(options.retryFailed).toBe(true);
   expect(options.trace).toBe(true);
   expect(options.headed).toBe(true);
+  expect(options.captureHtml).toBe(false);
+  expect(parseCliArgs(['--input', './input.xlsx', '--capture-html']).captureHtml).toBe(true);
 });

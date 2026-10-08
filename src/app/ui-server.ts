@@ -98,6 +98,7 @@ app.post('/api/runs', (req, res) => {
   const args = ['--import', 'tsx', path.join(root, 'src', 'main.ts'), '--input', inputPath, '--output', outputDir,
     settings.headless ? '--headless' : '--headed'];
   if (settings.trace) args.push('--trace');
+  if (settings.captureHtml) args.push('--capture-html');
   const run: RunState = {
     id, status: 'queued', currentModel: '', currentJob: 0, totalJobs: jobs.length, completedJobs: 0,
     successfulJobs: 0, failedJobs: 0, message: 'Preparing automation', startedAt: new Date().toISOString(),
