@@ -3,6 +3,21 @@ import type { ComponentInstruction } from '../models/component-instruction';
 import { waitForBlockingOverlay } from '../core/waits';
 import { QuantityHandler } from '../components/quantity-handler';
 
+export async function openDhciDriveEnclosure(page: Page): Promise<void> {
+  const header = page.locator('#section_header_driveEnclosureSection, [id*="section_header" i][id*="driveEnclosure" i]')
+    .filter({ visible: true }).first();
+  const fallback = page.getByText(/Drive Enclosure/i).filter({ visible: true }).first();
+  const section = await header.isVisible({ timeout: 3_000 }).catch(() => false) ? header : fallback;
+  await expect(section, 'Drive Enclosure section required by the selected controller chassis')
+    .toBeVisible({ timeout: 30_000 });
+  await section.scrollIntoViewIfNeeded();
+  if (await section.getAttribute('aria-expanded') !== 'true') {
+    console.log('[STEP] Opening dHCI Drive Enclosure section to apply its dependent defaults');
+    await section.click({ force: true });
+    await waitForBlockingOverlay(page);
+  }
+}
+
 export interface SolutionWizardSelection {
   label: string;
   value: string;
@@ -168,6 +183,10 @@ export class SolutionWizard {
     selected.push(await this.selectRandomMenuRow(
       'nodechassisSection_nodesChoice', 'Controller Node', nodeCombination.nodes, nodeCombination.nodes,
     ));
+    // Controller chassis selections reveal a required Drive Enclosure dependency.
+    // The proven S3V83A flow opens this section before choosing Capacity, allowing
+    // OCA to calculate and apply the enclosure defaults.
+    await openDhciDriveEnclosure(this.page);
     await this.disableRecommendedOnlyIfEnabled();
     selected.push(await this.selectRandomMenuRow('hardDriveSection_NVMeSFFFESSDsChoice', 'Capacity', 16, 48));
     selected.push(await this.selectRandomMenuRow('daccableSection_dacHostCablesChoice', 'DAC Cables', 8, 100));

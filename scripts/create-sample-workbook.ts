@@ -10,6 +10,7 @@ XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet([{
   'Model Number': 'P72176-B21',
   'Solution Name': 'DL360 Gen12 sample',
   Solution: 'No',
+  Storage: 'No',
   'Quotation Mode': 'aaS',
   Processor: 'Random',
   'Processor Qty': '1 or 2',

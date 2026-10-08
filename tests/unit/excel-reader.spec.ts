@@ -110,3 +110,19 @@ test('recognizes Solution and Solutions columns case-insensitively and defaults 
   const jobs = new ExcelReader().read(file);
   expect(jobs.map((job) => job.isSolution)).toEqual([true, true, true, true, true, false, false]);
 });
+
+test('maps the optional Storage flag without changing normal rows', () => {
+  const file = workbookAt([
+    { 'Job ID': 'STORAGE-1', 'Model Number': 'S1R06A', Storage: 'Yes' },
+    { 'Job ID': 'NORMAL-1', 'Model Number': 'P72176-B21', Storage: 'No' },
+  ], []);
+  const jobs = new ExcelReader().read(file);
+  expect(jobs.map((job) => job.isStorage)).toEqual([true, false]);
+});
+
+test('rejects a row that enables both Solution and Storage flows', () => {
+  const file = workbookAt([
+    { 'Job ID': 'AMBIGUOUS-1', 'Model Number': 'S1R06A', Solution: 'Yes', Storage: 'Yes' },
+  ], []);
+  expect(() => new ExcelReader().read(file)).toThrow('Solution and Storage cannot both be Yes');
+});

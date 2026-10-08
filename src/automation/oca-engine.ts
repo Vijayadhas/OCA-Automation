@@ -8,14 +8,30 @@ import { safeClick } from '../core/interactions';
 import { ModelSearch } from './model-search';
 import { ComponentEngine } from './component-engine';
 import { BillingTier } from './billing-tier';
-import { SaveFlow } from './save-flow';
+import { SaveFlow, SaveRecoveryRequiredError } from './save-flow';
 import { EndBom } from './end-bom';
 import { SupportServices } from './support-services';
 import { ExceptionRegistry } from '../exceptions/exception-registry';
 import type { ServerGeneration } from './model-search';
 import { SolutionWizard } from './solution-wizard';
+import { StorageFlow } from './storage-flow';
 
 export interface OcaEngineOptions { baseUrl: string; authWaitMs: number; expectedPageText: string; }
+
+export async function recoverRequiredMenuSelections(
+  page: Page,
+  components: Pick<ComponentEngine, 'satisfyRequiredSection' | 'satisfyVisibleRequiredControl'>,
+): Promise<void> {
+  const menu = page.locator('a[href="#extended_overview_menu"]')
+    .or(page.getByRole('link', { name: /^Menu$/i }))
+    .or(page.getByRole('link', { name: /^Components$/i }))
+    .filter({ visible: true }).first();
+  await expect(menu, 'Menu or Components tab for Save recovery').toBeVisible({ timeout: 30_000 });
+  console.log('[STEP] Returning to Menu to resolve selections that disabled Save');
+  await safeClick(menu);
+  await waitForBlockingOverlay(page);
+  await resolveConfigurationErrors(page, components);
+}
 
 export class OcaEngine {
   private page?: Page;
@@ -55,7 +71,12 @@ export class OcaEngine {
     const instructions = job.source.instructions;
     const executedInstructions = [] as typeof instructions;
     const useSolutionWizard = await this.shouldUseSolutionWizard(job);
-    if (useSolutionWizard) {
+    if (job.isStorage) {
+      this.currentStep = 'Configure Storage model';
+      const selections = await this.measure('Configure Storage model', () => new StorageFlow(this.activePage).configure());
+      result.selectedComponents = selections.map((item) =>
+        `${item.label}: ${item.productNumber || item.description} x${item.quantity}`).join('; ');
+    } else if (useSolutionWizard) {
       this.currentStep = 'Configure Solution Wizard';
       const selections = await this.measure('Configure Solution Wizard', () =>
         new SolutionWizard(this.activePage).configure(instructions, job.server));
@@ -93,7 +114,7 @@ export class OcaEngine {
     console.log('[STEP] Opening BOM tab');
     await this.measure('Billing Tier Setup', () => new BillingTier(this.activePage).run());
     this.currentStep = 'Save OCA configuration';
-    const save = await this.measure('Save OCA configuration', () => new SaveFlow(this.activePage).save());
+    const save = await this.saveWithRequiredSelectionRecovery();
     result.ucid = save.ucid; result.ocaConfigStatus = save.status;
     if (job.generateEndBom) {
       this.currentStep = 'Generate and associate End BOM';
@@ -122,6 +143,23 @@ export class OcaEngine {
 
   private shouldSkipSmartChassis(section: string, generation: ServerGeneration): boolean {
     return generation === 11 && /^smart\s*chassis$/i.test(section.trim());
+  }
+
+  private async saveWithRequiredSelectionRecovery() {
+    try {
+      return await this.measure('Save OCA configuration', () => new SaveFlow(this.activePage).save());
+    } catch (error) {
+      if (!(error instanceof SaveRecoveryRequiredError)) throw error;
+      console.log(`[WARN] ${error.message}`);
+      this.currentStep = 'Recover required Menu selections before Save';
+      await this.measure('Recover required Menu selections before Save', () =>
+        recoverRequiredMenuSelections(this.activePage, this.components));
+      this.currentStep = 'Refresh Billing Tier Setup after Menu recovery';
+      console.log('[STEP] Reopening BOM after required Menu selections were repaired');
+      await this.measure('Refresh Billing Tier Setup after Menu recovery', () => new BillingTier(this.activePage).run());
+      this.currentStep = 'Retry Save OCA configuration';
+      return await this.measure('Retry Save OCA configuration', () => new SaveFlow(this.activePage).save());
+    }
   }
 
   private async shouldUseSolutionWizard(job: OcaJob): Promise<boolean> {

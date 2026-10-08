@@ -2,9 +2,13 @@ import { expect, type Locator, type Page } from '@playwright/test';
 import { waitForBlockingOverlay } from '../core/waits';
 
 export interface SaveOutcome { ucid: string; status: string; }
+export interface SaveFlowOptions { confirmationTimeoutMs?: number; }
+export class SaveRecoveryRequiredError extends Error {
+  constructor(message: string) { super(message); this.name = 'SaveRecoveryRequiredError'; }
+}
 
 export class SaveFlow {
-  constructor(private readonly page: Page) {}
+  constructor(private readonly page: Page, private readonly options: SaveFlowOptions = {}) {}
 
   async save(): Promise<SaveOutcome> {
     await waitForBlockingOverlay(this.page);
@@ -30,6 +34,12 @@ export class SaveFlow {
       const saveButton = dialog.locator('#save_btn').or(dialog.getByRole('button', { name: 'Save', exact: true }))
         .filter({ visible: true }).last();
       await expect(saveButton).toBeVisible({ timeout: 60_000 });
+      if (await this.isDisabled(saveButton)) {
+        await this.closeDialogForRecovery(dialog);
+        throw new SaveRecoveryRequiredError(
+          'Save is disabled after acknowledgements; OCA requires additional component selections',
+        );
+      }
       // OCA can retain a disabled-looking CSS class after the real acknowledgement
       // is checked. Attempt the proven coordinate click and use dialog closure as truth.
       const saveBox = await saveButton.boundingBox();
@@ -46,9 +56,15 @@ export class SaveFlow {
       }
       if (!(await dialog.isVisible({ timeout: 1_000 }).catch(() => false))) {
         await waitForBlockingOverlay(this.page);
-        return { ucid: await this.readUcid(), status: 'Saved' };
+        return await this.verifySaved();
       }
       console.log('[WARN] Save dialog remains open; acknowledgements will be retried');
+      if (attempt >= 2) {
+        await this.closeDialogForRecovery(dialog);
+        throw new SaveRecoveryRequiredError(
+          'Save dialog remained open after two enabled Save attempts; checking Menu requirements before retrying',
+        );
+      }
     }
     throw new Error('Save dialog remained open after 5 acknowledgement and Save attempts');
   }
@@ -115,9 +131,15 @@ export class SaveFlow {
       return;
     }
 
-    // Click the label first. This produces the trusted browser event expected by
-    // OCA and avoids relying on either duplicated hidden clicStatus_flag input.
-    if (labelVisible) await label.dispatchEvent('click').catch(() => undefined);
+    // OCA's handlers require a trusted pointer event. dispatchEvent('click') changes
+    // some DOM state but does not enable Save for the CLIC acknowledgement.
+    if (labelVisible) {
+      await label.scrollIntoViewIfNeeded();
+      await label.click({ force: true }).catch(async () => {
+        const box = await label.boundingBox();
+        if (box) await this.page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      });
+    }
     if (iconVisible && !(await this.hasActiveCheckboxState(icon))) {
       await icon.dispatchEvent('mousedown').catch(() => undefined);
       await icon.dispatchEvent('mouseup').catch(() => undefined);
@@ -158,5 +180,51 @@ export class SaveFlow {
   private async readUcid(): Promise<string> {
     const body = (await this.page.locator('body').innerText()).replace(/\s+/g, ' ');
     return body.match(/\bUCID\s*[:#-]?\s*([A-Za-z0-9_-]{4,})/i)?.[1] ?? '';
+  }
+
+  private async isDisabled(button: Locator): Promise<boolean> {
+    if (await button.isDisabled().catch(() => false)) return true;
+    const state = [
+      await button.getAttribute('class').catch(() => ''),
+      await button.getAttribute('aria-disabled').catch(() => ''),
+      await button.getAttribute('data-disabled').catch(() => ''),
+    ].join(' ');
+    return /(?:^|\s)(?:disabled|ui-state-disabled)(?:\s|$)|\btrue\b/i.test(state);
+  }
+
+  private async closeDialogForRecovery(dialog: Locator): Promise<void> {
+    console.log('[STEP] Closing Save dialog to repair required Menu selections');
+    const close = dialog.locator(
+      '.ui-dialog-titlebar-close, [aria-label*="close" i], [title*="close" i], button.close',
+    ).filter({ visible: true }).first();
+    if (await close.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await close.click({ force: true });
+    } else {
+      await this.page.keyboard.press('Escape');
+    }
+    await expect(dialog, 'Save dialog should close before Menu recovery').toBeHidden({ timeout: 15_000 });
+    await waitForBlockingOverlay(this.page);
+  }
+
+  private async verifySaved(): Promise<SaveOutcome> {
+    let ucid = '';
+    const endBomEntry = this.page.locator([
+      '#obw_endbom_bot',
+      '[id*="endbom" i]',
+      '[data-action*="endbom" i]',
+    ].join(', ')).or(this.page.getByRole('button', { name: /End BOM/i }))
+      .or(this.page.getByRole('link', { name: /End BOM/i }))
+      .or(this.page.getByText(/^End BOM$/i)).filter({ visible: true }).first();
+
+    await expect.poll(async () => {
+      ucid = await this.readUcid();
+      return Boolean(ucid) || await endBomEntry.isVisible({ timeout: 500 }).catch(() => false);
+    }, {
+      timeout: this.options.confirmationTimeoutMs ?? 60_000,
+      message: 'Saved OCA configuration confirmation (UCID or End BOM action)',
+    }).toBe(true);
+
+    console.log(`[INFO] OCA configuration save confirmed${ucid ? ` with UCID ${ucid}` : ' by the available End BOM action'}`);
+    return { ucid, status: 'Saved' };
   }
 }

@@ -28,9 +28,20 @@ export class EndBom {
 
   async generateAndAssociate(): Promise<EndBomOutcome> {
     console.log('[STEP] Opening End BOM');
-    const endBom = this.page.locator('#obw_endbom_bot').or(this.page.getByText('End BOM', { exact: true }))
-      .filter({ visible: true }).first();
-    await expect(endBom).toBeVisible({ timeout: 60_000 });
+    const endBom = this.page.locator([
+      '#obw_endbom_bot',
+      '[id*="endbom" i]',
+      '[data-action*="endbom" i]',
+    ].join(', ')).or(this.page.getByRole('button', { name: /End BOM/i }))
+      .or(this.page.getByRole('link', { name: /End BOM/i }))
+      .or(this.page.getByText(/^End BOM$/i)).filter({ visible: true }).first();
+    try {
+      await expect(endBom, 'End BOM action after the OCA configuration is saved').toBeVisible({ timeout: 60_000 });
+    } catch (error) {
+      const state = await this.page.locator('body').innerText().catch(() => '');
+      const summary = state.replace(/\s+/g, ' ').trim().slice(0, 800);
+      throw new Error(`End BOM action was not available after Save. Current page: ${this.page.url()}. Visible page text: ${summary || '<empty>'}`, { cause: error });
+    }
     await endBom.click({ force: true });
     await waitForBlockingOverlay(this.page);
 

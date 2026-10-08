@@ -21,6 +21,7 @@ export interface OcaJob {
   server?: string;
   solutionName?: string;
   isSolution: boolean;
+  isStorage: boolean;
   quotationMode: 'aaS';
   serviceType: string;
   generateEndBom: boolean;

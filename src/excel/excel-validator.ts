@@ -16,6 +16,7 @@ export class ExcelValidator {
       if (!job.jobId) issues.push(`Models row ${job.inputRow}: Job ID is required`);
       if (!job.modelNumber) issues.push(`Models row ${job.inputRow}: Model Number is required`);
       if (job.quotationMode !== 'aaS') issues.push(`Models row ${job.inputRow}: Quotation Mode must be aaS`);
+      if (job.isSolution && job.isStorage) issues.push(`Models row ${job.inputRow}: Solution and Storage cannot both be Yes`);
       if (job.jobId && ids.has(job.jobId)) issues.push(`Models row ${job.inputRow}: duplicate Job ID ${job.jobId}`);
       ids.add(job.jobId);
       if (job.source.kind === 'detailed-excel') {
