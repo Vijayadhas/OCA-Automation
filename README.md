@@ -6,6 +6,10 @@ session, processes each job independently, and writes every result immediately t
 
 The original working Playwright tests remain unchanged under `tests/` and can still be run separately.
 
+Development happens on a machine without OCA access and is run on a separate system. See
+[`docs/DEVELOPMENT_WORKFLOW.md`](docs/DEVELOPMENT_WORKFLOW.md) for how to share HTML, report errors,
+and track changes.
+
 ## Install and verify
 
 ```bash
@@ -29,13 +33,17 @@ adding real job data if you want to preserve the example.
 ### Recommended single-sheet columns
 
 `Job ID`, `Model Number`, `Model Description`, `Solution`, `Solution Name`, `Integration Rack Part number`, `Server`,
-`Quotation Mode`, `Processor`, `Processor Qty`, `Memory`, `Memory Qty`, `Smart Chassis Product`,
+`Quotation Mode`, `Storage`, `Processor`, `Processor Qty`, `Memory`, `Memory Qty`, `Smart Chassis Product`,
 `Smart Chassis Qty`, `Chassis Config`, `Power Supply`,
 `Power Qty`, `Service`, `Generate End BOM`, `Enabled`
 
 Use `Default` when OCA should retain its default selection. Use `Automatic` for an automatically
 managed Smart Chassis choice. Quotation Mode must be `aaS`. If Job ID is blank, the tool assigns
 `ROW-<worksheet-row>`.
+
+Set `Storage` to `Yes` for a standalone storage model. The storage flow selects available Cloud
+Connectivity, Controller Node Models, and Capacity choices from OCA and derives quantities from the
+controls exposed by the page. A row cannot have both `Solution` and `Storage` set to `Yes`.
 
 Set `Solution` to `Yes` (case-insensitive) for a solution model. `Solutions` is also accepted for
 backward compatibility. Those rows are configured in the
