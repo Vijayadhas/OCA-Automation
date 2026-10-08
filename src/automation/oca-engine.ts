@@ -193,7 +193,13 @@ export class OcaEngine {
   }
 
   private async openOca(): Promise<void> {
-    const candidate = this.context.pages().find((page) => !page.isClosed()) ?? await this.context.newPage();
+    const openPages = this.context.pages().filter((page) => !page.isClosed());
+    const candidate = openPages[0] ?? await this.context.newPage();
+    // Customize opens each configuration in a new tab. Close the previous job's tabs
+    // (its screenshot and trace are already captured) so a batch does not accumulate them.
+    const previousTabs = openPages.slice(1);
+    if (previousTabs.length) console.log(`[INFO] Closing ${previousTabs.length} tab(s) from the previous job`);
+    for (const page of previousTabs) await page.close().catch(() => undefined);
     this.page = candidate;
     await this.page.goto(this.options.baseUrl, { waitUntil: 'domcontentloaded' });
     if (!this.authenticated) {

@@ -8,6 +8,7 @@ import * as XLSX from 'xlsx';
 import { ExcelReader } from '../excel/excel-reader';
 import { ExcelValidator } from '../excel/excel-validator';
 import type { OcaJob } from '../models/job';
+import { prepareRunJobs, writeRunWorkbook } from './run-workbook';
 
 type RunState = {
   id: string;
@@ -70,31 +71,19 @@ app.post('/api/import', upload.single('workbook'), (req, res) => {
   }
 });
 
-const createWorkbook = (jobs: OcaJob[], target: string) => {
-  const modelRows = jobs.map((job) => ({
-    'Job ID': job.jobId, 'Model Number': job.modelNumber, 'Model Description': job.modelDescription ?? '',
-    Solution: job.isSolution ? 'Yes' : 'No', 'Solution Name': job.solutionName ?? '',
-    'Integration Rack Part number': job.integrationRackPartNumber ?? '', Server: job.server ?? '',
-    'Quotation Mode': 'aaS', 'Service Type': job.serviceType,
-    'Generate End BOM': job.generateEndBom ? 'Yes' : 'No', Enabled: job.enabled ? 'Yes' : 'No',
-  }));
-  const componentRows = jobs.flatMap((job) => job.source.kind === 'detailed-excel'
-    ? job.source.instructions.map((item) => ({
-      'Job ID': job.jobId, Section: item.section, 'Product Number': item.productNumber ?? '',
-      Description: item.description ?? '', Quantity: item.quantity ?? '', 'Selection Type': item.selectionType,
-      'Configuration Text': item.configurationText ?? '', Sequence: item.sequence,
-    })) : []);
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(modelRows), 'Models');
-  if (componentRows.length) XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(componentRows), 'Components');
-  XLSX.writeFile(workbook, target);
-};
+const activeRun = () => [...runs.values()].find((run) => run.process);
 
 app.post('/api/runs', (req, res) => {
-  const jobs = req.body.jobs as OcaJob[];
-  if (!Array.isArray(jobs) || !jobs.length) return res.status(400).json({ error: 'Add at least one job.' });
-  jobs.forEach((job, index) => { job.inputRow = index + 2; job.quotationMode = 'aaS'; });
-  try { new ExcelValidator().validate(jobs); }
+  const active = activeRun();
+  if (active) {
+    return res.status(409).json({
+      error: `A run is already in progress${active.currentModel ? ` (${active.currentModel})` : ''}. Wait for it to finish or stop it first.`,
+    });
+  }
+  const posted = req.body.jobs as OcaJob[];
+  if (!Array.isArray(posted) || !posted.length) return res.status(400).json({ error: 'Add at least one job.' });
+  let jobs: OcaJob[];
+  try { jobs = prepareRunJobs(posted); new ExcelValidator().validate(jobs); }
   catch (error) { return res.status(400).json({ error: error instanceof Error ? error.message : String(error) }); }
 
   const id = crypto.randomUUID();
@@ -102,9 +91,11 @@ app.post('/api/runs', (req, res) => {
   const inputPath = path.join(runDir, 'input.xlsx');
   const outputDir = path.join(runDir, 'output');
   fs.mkdirSync(outputDir, { recursive: true });
-  createWorkbook(jobs, inputPath);
+  writeRunWorkbook(jobs, inputPath);
   const settings = req.body.settings ?? {};
-  const args = ['run', 'oca', '--', '--input', inputPath, '--output', outputDir,
+  // Run Node directly with the tsx loader. Windows Node refuses to spawn npm.cmd
+  // without a shell (EINVAL), and a single process can receive the IPC stop request.
+  const args = ['--import', 'tsx', path.join(root, 'src', 'main.ts'), '--input', inputPath, '--output', outputDir,
     settings.headless ? '--headless' : '--headed'];
   if (settings.trace) args.push('--trace');
   const run: RunState = {
@@ -112,12 +103,15 @@ app.post('/api/runs', (req, res) => {
     successfulJobs: 0, failedJobs: 0, message: 'Preparing automation', startedAt: new Date().toISOString(),
     logs: [], clients: new Set(),
   };
+
+  let child: ChildProcess;
+  try {
+    child = spawn(process.execPath, args, { cwd: root, env: process.env, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+  } catch (error) {
+    return res.status(500).json({ error: `Could not start the automation runner: ${error instanceof Error ? error.message : String(error)}` });
+  }
   runs.set(id, run);
   res.status(202).json({ id });
-
-  const child = spawn(process.platform === 'win32' ? 'npm.cmd' : 'npm', args, {
-    cwd: root, env: process.env, stdio: ['ignore', 'pipe', 'pipe'],
-  });
   run.process = child; run.status = 'running'; run.message = 'Opening browser session'; publish(run);
   const consume = (chunk: Buffer) => {
     for (const raw of chunk.toString().split(/\r?\n/)) {
@@ -130,14 +124,17 @@ app.post('/api/runs', (req, res) => {
         run.currentModel = started[3]; run.message = 'Configuring model';
       } else if (ended) {
         run.currentJob = Number(ended[1]); run.completedJobs += 1; run.currentModel = ended[3];
-        if (ended[4] === 'Success') run.successfulJobs += 1; else run.failedJobs += 1;
+        if (ended[4] === 'Success') run.successfulJobs += 1; else if (ended[4] !== 'Skipped') run.failedJobs += 1;
         run.message = ended[4] === 'Success' ? `Completed${ended[5] ? ` · ${ended[5]}` : ''}` : `${ended[4]}${ended[5] ? ` · ${ended[5]}` : ''}`;
-      } else if (line.includes('Waiting for authenticated')) run.message = 'Waiting for OCA sign-in';
+      } else if (line.includes('Complete manual authentication')) run.message = 'Waiting for OCA sign-in';
       publish(run);
     }
   };
   child.stdout?.on('data', consume); child.stderr?.on('data', consume);
-  child.on('error', (error) => { run.status = 'failed'; run.message = error.message; run.finishedAt = new Date().toISOString(); publish(run); });
+  child.on('error', (error) => {
+    // 'close' is not guaranteed after a spawn error; release the active-run slot here.
+    run.process = undefined; run.status = 'failed'; run.message = error.message; run.finishedAt = new Date().toISOString(); publish(run);
+  });
   child.on('close', (code, signal) => {
     run.process = undefined; run.finishedAt = new Date().toISOString();
     run.resultPath = path.join(outputDir, 'input-results.xlsx');
@@ -163,7 +160,12 @@ app.get('/api/runs/:id/events', (req, res) => {
 app.post('/api/runs/:id/stop', (req, res) => {
   const run = runs.get(req.params.id); if (!run) return res.status(404).json({ error: 'Run not found.' });
   if (!run.process) return res.status(409).json({ error: 'Run is not active.' });
-  run.status = 'stopping'; run.message = 'Finishing current job, then stopping'; run.process.kill('SIGINT'); publish(run);
+  run.status = 'stopping'; run.message = 'Finishing current job, then stopping';
+  // Signals cannot be delivered gracefully on Windows (kill terminates at once), so
+  // ask the runner over IPC; it finishes the current job and closes the browser.
+  if (run.process.connected) run.process.send({ type: 'stop' });
+  else run.process.kill();
+  publish(run);
   return res.json(serializable(run));
 });
 

@@ -45,7 +45,11 @@ export async function run(argv = process.argv.slice(2)): Promise<number> {
   };
   const onSigint = () => stop('SIGINT');
   const onSigterm = () => stop('SIGTERM');
-  process.on('SIGINT', onSigint); process.on('SIGTERM', onSigterm);
+  // The dashboard requests a stop over IPC because Windows cannot deliver SIGINT to a child.
+  const onMessage = (message: unknown) => {
+    if ((message as { type?: unknown } | null)?.type === 'stop') stop('dashboard');
+  };
+  process.on('SIGINT', onSigint); process.on('SIGTERM', onSigterm); process.on('message', onMessage);
   let failures = 0;
 
   try {
@@ -63,7 +67,9 @@ export async function run(argv = process.argv.slice(2)): Promise<number> {
       if (!job.enabled) {
         const skipped = createPendingResult(job.jobId, job.modelNumber); skipped.executionStatus = 'Skipped';
         skipped.errorMessage = 'Job is disabled'; skipped.endTime = new Date().toISOString();
-        await writer.writeResult(skipped); continue;
+        await writer.writeResult(skipped);
+        console.log(`[${index + 1}/${jobs.length}] ${job.modelNumber} - Skipped - Job is disabled`);
+        continue;
       }
       const retryCount = existing ? existing.retryCount + 1 : 0;
       console.log(`[${index + 1}/${jobs.length}] ${job.modelNumber} - Running`);
@@ -91,9 +97,14 @@ export async function run(argv = process.argv.slice(2)): Promise<number> {
   } finally {
     await session.close();
     process.removeListener('SIGINT', onSigint); process.removeListener('SIGTERM', onSigterm);
+    process.removeListener('message', onMessage);
   }
   console.log(`[INFO] Results written to ${writer.outputPath}`);
   return failures ? 1 : 0;
 }
 
-if (require.main === module) void run().then((code) => { process.exitCode = code; });
+if (require.main === module) {
+  // An open IPC channel to the dashboard would keep this process alive after the run.
+  void run().then((code) => { process.exitCode = code; })
+    .finally(() => { if (process.connected) process.disconnect?.(); });
+}

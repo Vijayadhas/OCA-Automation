@@ -125,7 +125,7 @@ export class ExcelReader {
     });
   }
 
-  private flatInstructions(row: Row, jobId: string): ComponentInstruction[] {
+  flatInstructions(row: Row, jobId: string): ComponentInstruction[] {
     const instructions: ComponentInstruction[] = [];
     let sequence = 10;
     const addProduct = (section: string, productCell: Cell, quantityCell: Cell) => {
@@ -175,4 +175,9 @@ export class ExcelReader {
     if (options.jobId) filtered = filtered.filter((job) => job.jobId === options.jobId);
     return filtered;
   }
+}
+
+/** Instructions for a model with no component columns: random Processor, Memory, Smart Chassis, and Power Supplies. */
+export function defaultComponentInstructions(jobId: string): ComponentInstruction[] {
+  return new ExcelReader().flatInstructions({}, jobId);
 }

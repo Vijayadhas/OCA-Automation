@@ -103,6 +103,10 @@ npm run ui
 Open `http://localhost:4173`. The dashboard accepts the existing Excel format or manual model and
 component entry, starts the same Playwright automation, shows the current model and batch progress,
 and provides live results plus an Excel download. Runs are stored locally under `.oca-ui/runs`.
+A manually added model with no components uses random Processor, Memory, Smart Chassis, and Power
+Supplies selections, exactly like a blank Models-sheet row. Tick **Storage model** or **Solution
+Wizard model** in the model dialog when needed. Only one run can be active at a time because runs
+share the browser profile; **Stop after current job** finishes the active model, then closes the browser.
 Set `OCA_UI_PORT` to use a different port. Environment variables and the persistent OCA browser
 profile work exactly as they do for the command-line runner.
 
