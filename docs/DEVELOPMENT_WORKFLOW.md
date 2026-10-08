@@ -85,7 +85,7 @@ Because of this, the first live run after any change should always be a single J
 
 ## Repository
 
-- This repository (`OCA-Automation`) is the working copy maintained from 8 October 2026 onward.
+- This repository ([`Vijayadhas/OCA-Automation`](https://github.com/Vijayadhas/OCA-Automation)) is the working copy maintained from 8 October 2026 onward.
 - It was copied, with full Git history, from `PlaywriteTest` at commit `f42ece6`
   (*Add OCA web control center*), together with the uncommitted fixes present at that time.
 - Run-system-only files stay out of Git: `.oca-local.json`, `.oca-profile/`, `.oca-ui/`,
