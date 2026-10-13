@@ -39,6 +39,8 @@ export class ModelSearch {
     const search = page.getByRole('textbox', { name: /Search to open UCID or create|Search config/i })
       .or(page.locator('#search-config')).first();
     await expect(search).toBeVisible({ timeout: 60_000 });
+    // Clear jQuery UI's result announcement so a "No search results." read later is for this search.
+    await this.searchStatus(page).evaluateAll((nodes) => nodes.forEach((node) => { node.textContent = ''; })).catch(() => undefined);
     await search.fill(modelNumber);
     const option = await this.findSearchOption(page, request);
     await safeClick(option);
@@ -76,12 +78,26 @@ export class ModelSearch {
     return { page: configPage, generation, family, description: cardText };
   }
 
+  /** jQuery UI autocomplete's live region: "No search results." or "N results are available…". */
+  private searchStatus(page: Page): Locator {
+    return page.locator('[role="status"].ui-helper-hidden-accessible');
+  }
+
   private async findSearchOption(page: Page, request: ModelSearchRequest): Promise<Locator> {
     const { modelNumber, description, isSolution } = request;
     const modelPattern = new RegExp(`\\b${escapeRegex(modelNumber)}\\b`, 'i');
     const options = page.locator('ul.ui-autocomplete:not([style*="display: none"]) li.ui-menu-item, [role="option"]')
       .filter({ hasText: modelPattern }).filter({ visible: true });
-    await expect(options.first(), `Search dropdown option for ${modelNumber}`).toBeVisible({ timeout: 60_000 });
+    let outcome = '';
+    await expect.poll(async () => {
+      if (await options.first().isVisible().catch(() => false)) return (outcome = 'options');
+      const announced = (await this.searchStatus(page).allTextContents().catch(() => [] as string[])).join(' ');
+      return (outcome = /no search results/i.test(announced) ? 'none' : '');
+    }, { timeout: 60_000, message: `Search dropdown option for ${modelNumber}` }).not.toBe('');
+    if (outcome === 'none' && !await options.first().isVisible({ timeout: 3_000 }).catch(() => false)) {
+      throw new Error(`OCA returned no search results for ${modelNumber} in aaS mode. Check the model number, `
+        + 'or search for it manually in OCA with aaS selected to confirm it is offered.');
+    }
     const optionTexts = await options.evaluateAll((nodes) => nodes.map((node) => (node.textContent ?? '')
       .replace(/\s+/g, ' ').trim()).filter(Boolean));
     console.log(`[INFO] ${modelNumber} matching search dropdown options (${optionTexts.length}): ${optionTexts.join(' || ')}`);
