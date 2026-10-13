@@ -37,8 +37,17 @@ export async function resolveConfigurationErrors(page: Page, components: Pick<Co
   if (await errorIcons.count() === 0) return;
   const unresolved = await errorIcons.evaluateAll((icons) => [...new Set(icons.map((icon) => {
     const header = icon.closest<HTMLElement>('[id*="section_header"], .section_header');
-    return (header?.innerText || icon.getAttribute('title') || 'Unknown section').replace(/\s+/g, ' ').trim();
+    if (!header) return icon.getAttribute('title') || 'Unknown section';
+    const copy = header.cloneNode(true) as HTMLElement;
+    copy.querySelectorAll('i, .section_counter, .section_toggle').forEach((node) => node.remove());
+    return (copy.textContent ?? '').replace(/\s+/g, ' ').trim() || 'Unknown section';
   }))]);
-  throw new Error(`Cannot continue to Services while OCA error icons remain: ${unresolved.join('; ')}`);
+  // A rule that spans sections (for example CPU power + heatsink + OCP card) is not fixed
+  // by re-selecting one section; OCA's own error text says what it needs.
+  const messages = await page.locator('.choice_messages.error_bgd .error_message').evaluateAll((nodes) => [...new Set(nodes
+    .map((node) => (node.textContent ?? '').replace(/\s+/g, ' ').trim()).filter(Boolean))].slice(0, 5)
+    .map((text) => (text.length > 400 ? `${text.slice(0, 400)}…` : text)));
+  throw new Error(`Cannot continue to Services while OCA error icons remain: ${unresolved.join('; ')}`
+    + (messages.length ? `. OCA messages: ${messages.join(' || ')}` : ''));
 }
 

@@ -11,6 +11,13 @@ export class UnsupportedComponentError extends Error {
   constructor(message: string) { super(message); this.name = 'UnsupportedComponentError'; }
 }
 
+/**
+ * Random processor picks stay at or below this power. Above 270W, OCA pairs the CPU
+ * with the Performance heatsink, and its rule then requires an OCP Enablement Kit for
+ * any 1G/10G OCP card (seen on P72176-B21 with a 350W CPU). Excel-entered CPUs are not limited.
+ */
+export const MAX_RANDOM_PROCESSOR_WATTS = 270;
+
 export function isMemoryBlankProduct(description: string): boolean {
   return /\b(?:memory\s+)?blank(?:\s+kit)?\b/i.test(description);
 }
@@ -88,6 +95,11 @@ export class ComponentEngine {
     section ??= this.page.locator('button, a').filter({ visible: true, hasText: exact }).first();
     await expect(section, `Section ${sectionName}`).toBeVisible({ timeout: 60_000 });
     if (await section.getAttribute('aria-expanded') === 'true') return;
+    // OCA section headers carry no aria-expanded, and clicking an open header collapses it
+    // (required-selection recovery then saw zero processor rows). Visible choices = open.
+    const sectionKey = (await section.getAttribute('id'))?.match(/^section_header_(.+)$/)?.[1];
+    if (sectionKey && await this.page.locator(`[id^="choice_header_${sectionKey}_"], tr.item_tr[data-elementid^="${sectionKey}_"]`)
+      .filter({ visible: true }).count()) return;
     await section.scrollIntoViewIfNeeded();
     await section.click({ force: true });
     await waitForBlockingOverlay(this.page);
@@ -143,17 +155,26 @@ export class ComponentEngine {
       .locator('tr.item_tr[id$="_ProcessorSection_ProcessorChoice"], tr.item_tr[data-elementid="ProcessorSection_ProcessorChoice"]')
       .filter({ visible: true });
     const available: Array<{ row: Locator; productNumber: string }> = [];
+    const overLimit: string[] = [];
     const count = await candidates.count();
     for (let index = 0; index < count; index += 1) {
       const row = candidates.nth(index);
       const productNumber = ((await row.locator('._pid').first().textContent().catch(() => '')) ?? '').trim();
       const hasRadio = await row.locator('input[type="radio"]').count();
       const hasQuantity = await row.locator('td.item_qty .item_qty_div, td.item_qty select').count();
-      if (productNumber && hasRadio && hasQuantity) available.push({ row, productNumber });
+      if (!productNumber || !hasRadio || !hasQuantity) continue;
+      const description = ((await row.locator('.item_desc').first().textContent().catch(() => '')) ?? '').replace(/\s+/g, ' ');
+      const watts = Number(description.match(/(\d+)\s*W\b/i)?.[1]);
+      if (watts > MAX_RANDOM_PROCESSOR_WATTS) { overLimit.push(`${productNumber} ${watts}W`); continue; }
+      available.push({ row, productNumber });
+    }
+    if (overLimit.length) {
+      console.log(`[INFO] Random Processor skips ${overLimit.length} CPU(s) over ${MAX_RANDOM_PROCESSOR_WATTS}W: ${overLimit.join(', ')}`);
     }
     if (!available.length) {
       throw new UnsupportedComponentError(
-        `No visible rows matched ProcessorSection_ProcessorChoice (visible processor candidates: ${count})`,
+        `No visible rows matched ProcessorSection_ProcessorChoice at or below ${MAX_RANDOM_PROCESSOR_WATTS}W `
+        + `(visible processor candidates: ${count}; over the limit: ${overLimit.length})`,
       );
     }
     return this.tryRandomCandidates('Processor', available, async (selected) => {
