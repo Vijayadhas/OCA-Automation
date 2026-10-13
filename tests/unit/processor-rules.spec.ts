@@ -1,5 +1,5 @@
 import { test, expect, type Locator } from '@playwright/test';
-import { ComponentEngine, MAX_RANDOM_PROCESSOR_WATTS } from '../../src/automation/component-engine';
+import { ComponentEngine, MAX_RANDOM_PROCESSOR_WATTS, fitQuantity } from '../../src/automation/component-engine';
 import { resolveConfigurationErrors } from '../../src/automation/configuration-errors';
 import { QuantityHandler } from '../../src/components/quantity-handler';
 import { menuSection, type FixtureRow } from './oca-menu-fixture';
@@ -59,4 +59,46 @@ test('an unresolved cross-section rule quotes OCA error messages, not warnings',
   }).catch((caught: Error) => caught);
   expect(String(error)).toContain('OCA error icons remain: Processor. OCA messages: If Processor (>270W) is selected with Performance Heatsink');
   expect(String(error)).not.toContain('Only a warning');
+});
+
+// Rules as OCA renders them on P83540-B21 (DL580 Gen12): each li names its choices with a.err-lnk.
+const dl580Rules = `<div class="choice_messages error_bgd"><ul class="messages_ul">
+  <li class="message_li"><span class="error_message">CTO Server with 2 Processors (System: Std 0 // Max 32)
+    (User Selection: Min 2 // Max 32) Total memory selection must be in quantities of 2 / 4 / 8 / 16 / 24 / 32 only
+    (<a class="err-lnk" id="cpuX_cpus">Processor</a>, <a class="err-lnk" id="memX_slots">Memory</a>)</span></li>
+  <li class="message_li"><span class="error_message">CTO Server (System: Std 0 // Max 4) (User Selection: Min 2 // Max 4)
+    Odd quantities of processor selection is not allowed. (<a class="err-lnk" id="cpuX_cpus">Processor</a>)</span></li>
+</ul></div>`;
+const addRules = (page: import('@playwright/test').Page) => page.locator('#choice_header_cpuX_cpus td')
+  .evaluate((cell, html) => cell.insertAdjacentHTML('beforeend', html), dl580Rules);
+
+test('fits a quantity into an OCA rule', () => {
+  expect(fitQuantity(1, { min: 2, max: 4, even: true })).toBe(2);
+  expect(fitQuantity(3, { min: 2, max: 4, even: true })).toBe(4);
+  expect(fitQuantity(5, { min: 2, max: 4, even: true })).toBe(4);
+  expect(fitQuantity(1, { min: 0, max: Number.POSITIVE_INFINITY, even: false })).toBe(1);
+});
+
+test('reads only the quantity rule that covers the choice alone', async ({ page }) => {
+  await page.setContent(processorSection([{ pid: 'CPU', radio: false, select: [0, 1, 2, 3, 4] }]));
+  await addRules(page);
+  expect(await new ComponentEngine(page).quantityRule('cpuX_cpus')).toEqual({ min: 2, max: 4, even: true });
+});
+
+test('raises a random processor quantity to what OCA allows', async ({ page }) => {
+  await page.setContent(processorSection([{ pid: 'CPU', description: '210W Processor', radio: false, select: [0, 1, 2, 3, 4] }]));
+  await addRules(page);
+  const original = Math.random;
+  Math.random = () => 0;
+  try {
+    expect(await new ComponentEngine(page).selectRandom('Processor')).toMatchObject({ productNumber: 'CPU', quantity: 2 });
+  } finally { Math.random = original; }
+  await expect(page.locator('#item_tr_CPU_cpuX_cpus select')).toHaveValue('2');
+});
+
+test('corrects an existing processor quantity that breaks the OCA rule', async ({ page }) => {
+  await page.setContent(processorSection([{ pid: 'CPU', radio: false, quantity: 1, select: [0, 1, 2, 3, 4] }]));
+  await addRules(page);
+  await new ComponentEngine(page).satisfyRequiredSection('Processor');
+  await expect(page.locator('#item_tr_CPU_cpuX_cpus select')).toHaveValue('2');
 });

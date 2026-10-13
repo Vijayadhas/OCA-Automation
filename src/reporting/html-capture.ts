@@ -45,6 +45,8 @@ export function serializeDom(): string {
       clone.textContent = '';
     }
     if (!document.body?.contains(original) || original === document.body) continue;
+    // Options never have boxes of their own; their select's visibility is what counts.
+    if (original instanceof HTMLOptionElement || original instanceof HTMLOptGroupElement) continue;
     const parent = original.parentElement;
     if (parent && hidden.has(parent)) { hidden.add(original); continue; }
     const notRendered = original.getClientRects().length === 0;

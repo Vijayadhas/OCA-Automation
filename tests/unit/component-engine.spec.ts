@@ -1,8 +1,9 @@
 import { expect, test } from '@playwright/test';
 import { ComponentEngine, isMemoryBlankProduct } from '../../src/automation/component-engine';
 import { menuSection } from './oca-menu-fixture';
+import type { ComponentInstruction } from '../../src/models/component-instruction';
 
-const random = (section: string) => ({ jobId: 'test', section, selectionType: 'random' as const, sequence: 10 });
+const random = (section: string): ComponentInstruction => ({ jobId: 'test', section, selectionType: 'random', sequence: 10 });
 
 test('distinguishes memory blank kits from usable memory products', () => {
   expect(isMemoryBlankProduct('HPE ProLiant Compute Gen12 Memory Blank Kit')).toBe(true);

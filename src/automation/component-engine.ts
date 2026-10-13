@@ -42,6 +42,17 @@ interface RowInfo {
 
 interface RandomPolicy { quantities: number[]; radioOnly: boolean; limitWatts: boolean }
 
+/** A quantity range OCA states for one choice (from its "User Selection: Min/Max" and odd-quantity rules). */
+export interface QuantityRule { min: number; max: number; even: boolean }
+
+/** The nearest quantity at or above the wanted one that satisfies the rule (or the highest allowed). */
+export function fitQuantity(quantity: number, rule: QuantityRule): number {
+  let value = Math.max(quantity, rule.min);
+  if (rule.even && value % 2) value += 1;
+  if (value > rule.max) value = rule.even && rule.max % 2 ? rule.max - 1 : rule.max;
+  return value;
+}
+
 /** How a random pick behaves per component category (the category, never the model). */
 function randomPolicy(sectionName: string): RandomPolicy {
   if (/^processors?$/i.test(sectionName.trim())) return { quantities: [1, 2], radioOnly: false, limitWatts: true };
@@ -266,13 +277,48 @@ export class ComponentEngine {
     return !row.quantity && row.radioChecked ? 1 : 0;
   }
 
-  /** The product already selected in a choice, if any. */
-  async existingSelection(choiceId: string): Promise<Selection | null> {
+  /** The product already selected in a choice, if any, with its row id. */
+  async existingSelection(choiceId: string): Promise<(Selection & { rowId: string }) | null> {
     const rows = await this.rowInfo(this.choiceRows(choiceId).filter({ visible: true }));
     const selected = rows.find((row) => row.productNumber && this.committedQuantity(row) > 0);
     return selected
-      ? { productNumber: selected.productNumber, description: selected.description, quantity: this.committedQuantity(selected) }
+      ? { productNumber: selected.productNumber, description: selected.description, quantity: this.committedQuantity(selected), rowId: selected.id }
       : null;
+  }
+
+  /**
+   * OCA's quantity rule for one choice, read from its error messages. Each rule is an
+   * li.message_li whose error_message links (a.err-lnk, id = choice id) list the choices it
+   * covers; only rules covering this choice alone are used, e.g. on DL580 Gen12:
+   * "(User Selection: Min 2 // Max 4) Odd quantities of processor selection is not allowed. (Processor)".
+   */
+  async quantityRule(choiceId: string): Promise<QuantityRule | null> {
+    const rules = await this.page.locator(`[id=${JSON.stringify(`choice_header_${choiceId}`)}] li.message_li .error_message`)
+      .evaluateAll((spans) => spans.map((span) => ({
+        text: (span.textContent ?? '').replace(/\s+/g, ' ').trim(),
+        targets: Array.from(span.querySelectorAll('a.err-lnk')).map((link) => link.id),
+      })));
+    let rule: QuantityRule | null = null;
+    for (const { text, targets } of rules) {
+      if (targets.length !== 1 || targets[0] !== choiceId) continue;
+      const range = text.match(/User Selection:\s*Min\s*(\d+)\s*\/\/\s*Max\s*(\d+)/i);
+      const even = /odd quantit(?:y|ies)\b[^.]*\bnot allowed/i.test(text);
+      if (!range && !even) continue;
+      rule ??= { min: 0, max: Number.POSITIVE_INFINITY, even: false };
+      if (range) { rule.min = Math.max(rule.min, Number(range[1])); rule.max = Math.min(rule.max, Number(range[2])); }
+      rule.even ||= even;
+    }
+    return rule;
+  }
+
+  /** Brings a committed quantity into OCA's rule for the choice; returns the quantity now committed. */
+  private async enforceQuantityRule(choiceId: string, row: Locator, productNumber: string, quantity: number): Promise<number> {
+    const rule = await this.quantityRule(choiceId);
+    if (!rule) return quantity;
+    const allowed = fitQuantity(quantity, rule);
+    if (allowed === quantity) return quantity;
+    console.log(`[INFO] ${productNumber}: OCA allows ${rule.min}-${rule.max}${rule.even ? ', even only' : ''}; changing quantity ${quantity} to ${allowed}`);
+    return this.quantities.set(row, productNumber, allowed, true, { acceptOffered: true });
   }
 
   /**
@@ -285,8 +331,11 @@ export class ComponentEngine {
     if (!choice) throw new UnsupportedComponentError(`Section ${section.title} has no choice with product rows`);
     const existing = await this.existingSelection(choice.id);
     if (existing) {
-      console.log(`[INFO] ${section.title} ${existing.productNumber} x${existing.quantity} is already selected; leaving it unchanged`);
-      return existing;
+      console.log(`[INFO] ${section.title} ${existing.productNumber} x${existing.quantity} is already selected; keeping it`);
+      const quantity = !randomPolicy(sectionName).radioOnly
+        ? await this.enforceQuantityRule(choice.id, this.page.locator(`[id=${JSON.stringify(existing.rowId)}]`), existing.productNumber, existing.quantity)
+        : existing.quantity;
+      return { productNumber: existing.productNumber, description: existing.description, quantity };
     }
     const policy = randomPolicy(sectionName);
     const columns = this.page.locator(`[id=${JSON.stringify(`choice_column_titles_${choice.id}`)}]`).filter({ visible: true }).first();
@@ -319,7 +368,9 @@ export class ComponentEngine {
         return { productNumber: candidate.productNumber, description: candidate.description, quantity: 1 };
       }
       const wanted = policy.quantities[Math.floor(Math.random() * policy.quantities.length)];
-      const quantity = await this.quantities.set(candidate.row, candidate.productNumber, wanted, true, { acceptOffered: true });
+      const set = await this.quantities.set(candidate.row, candidate.productNumber, wanted, true, { acceptOffered: true });
+      // OCA states its quantity rules only once a product is selected.
+      const quantity = await this.enforceQuantityRule(choice.id, candidate.row, candidate.productNumber, set);
       return { productNumber: candidate.productNumber, description: candidate.description, quantity };
     });
   }
