@@ -19,7 +19,12 @@ export async function resolveConfigurationErrors(page: Page, components: Pick<Co
     }
 
     const icon = errorIcons.first();
-    const header = icon.locator('xpath=ancestor::*[contains(@id,"section_header") or contains(concat(" ", normalize-space(@class), " "), " section_header ")][1]');
+    let header = icon.locator('xpath=ancestor::*[contains(@id,"section_header") or contains(concat(" ", normalize-space(@class), " "), " section_header ")][1]');
+    // A choice's own status icon (visible once its section is open) belongs to the section header above it.
+    if (!await header.count()) {
+      header = icon.locator('xpath=ancestor::tr[contains(concat(" ", normalize-space(@class), " "), " choice_header ")][1]'
+        + '/preceding::*[starts-with(@id, "section_header_")][1]');
+    }
     if (await header.count()) {
       const sectionName = await header.evaluate((element) => {
         const copy = element.cloneNode(true) as HTMLElement;

@@ -293,13 +293,8 @@ export class ComponentEngine {
    * "(User Selection: Min 2 // Max 4) Odd quantities of processor selection is not allowed. (Processor)".
    */
   async quantityRule(choiceId: string): Promise<QuantityRule | null> {
-    const rules = await this.page.locator(`[id=${JSON.stringify(`choice_header_${choiceId}`)}] li.message_li .error_message`)
-      .evaluateAll((spans) => spans.map((span) => ({
-        text: (span.textContent ?? '').replace(/\s+/g, ' ').trim(),
-        targets: Array.from(span.querySelectorAll('a.err-lnk')).map((link) => link.id),
-      })));
     let rule: QuantityRule | null = null;
-    for (const { text, targets } of rules) {
+    for (const { text, targets } of await this.choiceRules(choiceId)) {
       if (targets.length !== 1 || targets[0] !== choiceId) continue;
       const range = text.match(/User Selection:\s*Min\s*(\d+)\s*\/\/\s*Max\s*(\d+)/i);
       const even = /odd quantit(?:y|ies)\b[^.]*\bnot allowed/i.test(text);
@@ -309,6 +304,69 @@ export class ComponentEngine {
       rule.even ||= even;
     }
     return rule;
+  }
+
+  /**
+   * OCA's error-level rules shown on a choice: each li.message_li's text and the choice ids
+   * its a.err-lnk links name (the choices the rule covers).
+   */
+  async choiceRules(choiceId: string): Promise<Array<{ text: string; targets: string[] }>> {
+    return this.page.locator(`[id=${JSON.stringify(`choice_header_${choiceId}`)}] li.message_li .error_message`)
+      .evaluateAll((spans) => spans.map((span) => ({
+        text: (span.textContent ?? '').replace(/\s+/g, ' ').trim(),
+        targets: Array.from(span.querySelectorAll('a.err-lnk')).map((link) => link.id),
+      })));
+  }
+
+  /** Choices of a section whose status icon OCA shows as an error (img-alert). */
+  async flaggedChoices(section: MenuSection): Promise<MenuChoice[]> {
+    const choices = await this.choices(section);
+    const flagged = await this.page.evaluate((ids) => ids.filter((id) =>
+      document.getElementById(`choice_status_icon_${id}`)?.classList.contains('img-alert')), choices.map((choice) => choice.id));
+    return choices.filter((choice) => flagged.includes(choice.id));
+  }
+
+  /** The visible section that owns a choice id (longest key that prefixes it). */
+  private async owningSection(choiceId: string): Promise<MenuSection | null> {
+    const owner = (await this.sections()).filter((section) => section.visible && choiceId.startsWith(`${section.key}_`))
+      .sort((a, b) => b.key.length - a.key.length)[0];
+    return owner ? { key: owner.key, title: owner.title } : null;
+  }
+
+  /**
+   * Fills a flagged choice that has no selection. Prefers the products OCA's message names
+   * (e.g. "At-least one option from the below list must be selected - 8SFF x1 Drive Cage
+   * (P80429-B21) ..."), taken from the choices that message covers; otherwise, when allowed,
+   * any available product of the choice. Returns false when there is nothing to fill.
+   */
+  private async repairFlaggedChoice(choice: MenuChoice, allowUnnamed: boolean): Promise<boolean> {
+    if (await this.existingSelection(choice.id)) return false;
+    const pickable = (row: RowInfo) => Boolean(row.id && row.productNumber && !row.unavailable
+      && !isMemoryBlankProduct(row.description) && (row.hasQuantity || row.hasRadio));
+    const candidates = new Map<string, RowInfo & { choiceId: string }>();
+    for (const rule of await this.choiceRules(choice.id)) {
+      for (const target of new Set([choice.id, ...rule.targets])) {
+        for (const row of await this.rowInfo(this.choiceRows(target))) {
+          if (pickable(row) && rule.text.includes(row.productNumber)) candidates.set(row.id, { ...row, choiceId: target });
+        }
+      }
+    }
+    const named = candidates.size > 0;
+    if (!named && allowUnnamed) {
+      for (const row of await this.rowInfo(this.choiceRows(choice.id))) if (pickable(row)) candidates.set(row.id, { ...row, choiceId: choice.id });
+    }
+    if (!candidates.size) return false;
+    // Open every section a candidate lives in before reading or changing its quantity.
+    for (const choiceId of new Set([...candidates.values()].map((row) => row.choiceId))) {
+      const owner = await this.owningSection(choiceId);
+      if (owner) await this.open(owner);
+    }
+    console.log(`[STEP] Filling flagged choice "${choice.title || choice.id}" from ${named ? 'the products OCA names' : 'its available products'}: `
+      + [...candidates.values()].map((row) => row.productNumber).join(', '));
+    await this.tryRandomCandidates(choice.title || choice.id, [...candidates.values()].map((row) => ({
+      row: this.page.locator(`[id=${JSON.stringify(row.id)}]`), productNumber: row.productNumber,
+    })), (candidate) => this.quantities.set(candidate.row, candidate.productNumber, 1, false, { acceptOffered: true }));
+    return true;
   }
 
   /** Brings a committed quantity into OCA's rule for the choice; returns the quantity now committed. */
@@ -445,14 +503,19 @@ export class ComponentEngine {
    * is an OCA rule, which resolveConfigurationErrors reports with OCA's own message).
    */
   async satisfyRequiredSection(sectionName: string): Promise<void> {
-    if (RANDOMIZED_SECTIONS.test(sectionName.trim())) { await this.selectRandom(sectionName); return; }
-    await this.openSection(sectionName);
-    if (!await this.satisfyVisibleRequiredControl()) {
-      throw new UnsupportedComponentError(`No selectable required control was found in error section ${sectionName}`);
+    const randomized = RANDOMIZED_SECTIONS.test(sectionName.trim());
+    if (randomized) await this.selectRandom(sectionName);
+    const section = await this.openSection(sectionName);
+    // Only this section's flagged choices are touched. In component sections the main choice is
+    // already set, so other flagged choices are filled only with products OCA names.
+    for (const choice of await this.flaggedChoices(section)) {
+      if (await this.repairFlaggedChoice(choice, !randomized)) return;
     }
+    if (randomized || await this.satisfyVisibleRequiredControl()) return;
+    console.log(`[WARN] ${sectionName} is flagged, but none of its flagged choices can be filled; OCA's message will be reported`);
   }
 
-  /** Handles required dropdowns/rows not represented by an instruction. */
+  /** Fills an empty required dropdown ("Please make a selection"); never changes product rows. */
   async satisfyVisibleRequiredControl(): Promise<boolean> {
     const selects = this.page.locator('select:visible');
     for (let index = 0; index < await selects.count(); index += 1) {
@@ -474,20 +537,8 @@ export class ComponentEngine {
       await waitForBlockingOverlay(this.page);
       return true;
     }
-
-    const row = this.page.locator('tr.item_tr:visible, tr[role="row"]:visible')
-      .filter({ has: this.page.locator('input[type="radio"]:not(:checked)') }).first();
-    if (await row.isVisible({ timeout: 1_000 }).catch(() => false)) {
-      const productNumber = ((await row.locator('._pid').first().textContent().catch(() => '')) ?? '').trim();
-      if (productNumber && await row.locator('td.item_qty .item_qty_div, td.item_qty select').count()) {
-        console.log(`[STEP] Required product: ${productNumber} x1`);
-        await this.quantities.set(row, productNumber, 1, false);
-      } else {
-        await row.locator('input[type="radio"]').first().check({ force: true });
-        await waitForBlockingOverlay(this.page);
-      }
-      return true;
-    }
+    // No page-wide product fallback: picking "any unselected row" changed the processor
+    // when OCA asked for a drive cage (P83540-B21).
     return false;
   }
 }

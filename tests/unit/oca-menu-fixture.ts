@@ -18,7 +18,13 @@ export interface FixtureRow {
   quantityExtra?: string;
 }
 
-export interface FixtureChoice { id: string; title: string; rows: FixtureRow[] }
+export interface FixtureChoice {
+  id: string; title: string; rows: FixtureRow[];
+  /** OCA marks a choice that needs attention with an img-alert status icon. */
+  flagged?: boolean;
+  /** Inner HTML of the choice messages list (li.message_li items). */
+  messages?: string;
+}
 
 export interface FixtureSection {
   key: string;
@@ -60,9 +66,10 @@ export function menuSection(section: FixtureSection): string {
     <tbody id="${bodyId}"${section.collapsed ? ' style="display:none"' : ''}>
     ${section.choices.map((choice) => `
       <tr class="choice_header" id="choice_header_${choice.id}"><td>
+        <i class="${choice.flagged ? 'img-alert' : 'img-info'} dqe-status-icon-14" id="choice_status_icon_${choice.id}"></i>
         <span class="choice_title" id="choice_title_${choice.id}">
           ${choice.title}
-        </span></td></tr>
+        </span>${choice.messages ? `<div class="choice_messages error_bgd"><ul class="messages_ul">${choice.messages}</ul></div>` : ''}</td></tr>
       ${choice.rows.map((item) => row(choice.id, item)).join('')}`).join('')}
     </tbody></table>`;
 }
