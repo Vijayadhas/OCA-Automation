@@ -6,6 +6,7 @@ import { RadioHandler } from '../components/radio-handler';
 import { ConfigurationHandler } from '../components/configuration-handler';
 import { AutomaticDependencyHandler } from '../components/automatic-dependency-handler';
 import type { ServerFamily } from './model-search';
+import type { PageSnapshot } from '../reporting/html-capture';
 
 export class UnsupportedComponentError extends Error {
   constructor(message: string) { super(message); this.name = 'UnsupportedComponentError'; }
@@ -28,8 +29,8 @@ export class ComponentEngine {
   private readonly configurations: ConfigurationHandler;
   private readonly dependencies: AutomaticDependencyHandler;
 
-  constructor(private readonly page: Page, private readonly serverFamily: ServerFamily = 'unknown') {
-    this.quantities = new QuantityHandler(page);
+  constructor(private readonly page: Page, private readonly serverFamily: ServerFamily = 'unknown', snapshot?: PageSnapshot) {
+    this.quantities = new QuantityHandler(page, snapshot);
     this.configurations = new ConfigurationHandler(page);
     this.dependencies = new AutomaticDependencyHandler(this.quantities);
   }

@@ -5,6 +5,9 @@ import type { Frame, Page } from '@playwright/test';
 /** off: never; failure: when a job fails (default); steps: after every engine step and on failure. */
 export type HtmlCaptureMode = 'off' | 'failure' | 'steps';
 
+/** Saves the current page under a label; handed to flows that need a mid-step capture. */
+export type PageSnapshot = (label: string) => Promise<unknown>;
+
 const safeName = (value: string) => value.replace(/[^A-Za-z0-9_.-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 80);
 const FRAME_TIMEOUT_MS = 15_000;
 
@@ -75,6 +78,14 @@ export class HtmlCapture {
   /** Captures after a successful engine step when every step is being recorded. */
   async step(page: Page | undefined, label: string): Promise<string> {
     return this.mode === 'steps' ? this.capture(page, label) : '';
+  }
+
+  /**
+   * Captures a mid-step moment needed for diagnosis (a quantity menu that did not open,
+   * the generated End BOM). Saved in failure and steps mode, like a failure capture.
+   */
+  async diagnostic(page: Page | undefined, label: string): Promise<string> {
+    return this.mode === 'off' ? '' : this.capture(page, label);
   }
 
   /** Captures the page as it was when a job failed. */

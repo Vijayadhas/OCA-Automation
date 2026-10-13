@@ -1,8 +1,9 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { escapeRegex, waitForBlockingOverlay } from '../core/waits';
+import type { PageSnapshot } from '../reporting/html-capture';
 
 export class QuantityHandler {
-  constructor(private readonly page: Page) {}
+  constructor(private readonly page: Page, private readonly snapshot?: PageSnapshot) {}
 
   async committedQuantity(row: Locator, productNumber: string): Promise<string> {
     return this.readCommitted(row, productNumber);
@@ -38,7 +39,7 @@ export class QuantityHandler {
       console.log(`[INFO] ${productNumber} is already selected with quantity ${quantity}; leaving it unchanged`);
     } else {
       try {
-        await this.write(row, quantity);
+        await this.write(row, quantity, productNumber);
       } catch (error) {
         // A quantity click can cause an immediate row rebuild. Confirm the refreshed
         // committed row before treating a missing dropdown option as a real failure.
@@ -77,7 +78,7 @@ export class QuantityHandler {
     }).toBe(String(quantity));
   }
 
-  private async write(row: Locator, quantity: number): Promise<void> {
+  private async write(row: Locator, quantity: number, productNumber: string): Promise<void> {
     const value = String(quantity);
     const select = row.locator('select').filter({ visible: true }).first();
     if (await select.isVisible({ timeout: 1_000 }).catch(() => false)) {
@@ -97,6 +98,7 @@ export class QuantityHandler {
     if (!(await target.isVisible({ timeout: 1_000 }).catch(() => false))) target = quantityCell;
     await target.scrollIntoViewIfNeeded();
     await target.evaluate((element) => element.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }));
+    let offered: string[] = [];
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       // dHCI tables are inconsistent: chassis rows open from the inner div,
       // while rebuilt node rows can open only from the owning quantity cell.
@@ -130,10 +132,21 @@ export class QuantityHandler {
         return;
       }
       console.log(`[WARN] Quantity option ${value} did not open on attempt ${attempt}/3; retrying`);
+      // Keep the page as the last click left it, before Escape closes anything that did open.
+      if (attempt === 3) {
+        await this.snapshot?.(`WARN-Quantity ${value} did not open for ${productNumber}`);
+        // The menu may have opened without this value (OCA can allow only some quantities).
+        offered = (await this.page.locator([
+          '.selecter.open .selecter-item', '.selecter-options:visible .selecter-item',
+          '[role="listbox"]:visible [role="option"]', '.ui-menu:visible .ui-menu-item',
+        ].join(', ')).filter({ visible: true }).allTextContents().catch(() => [] as string[]))
+          .map((text) => text.replace(/\s+/g, ' ').trim()).filter(Boolean);
+      }
       await this.page.keyboard.press('Escape').catch(() => undefined);
       await this.page.waitForTimeout(500);
     }
-    throw new Error(`Quantity option ${value} did not open for the selected row after 3 attempts`);
+    throw new Error(`Quantity option ${value} did not open for the selected row after 3 attempts`
+      + ` (visible options: ${offered.length ? offered.join(', ') : 'none'})`);
   }
 
   private async findNearestOpenOption(target: Locator, value: string): Promise<Locator | null> {

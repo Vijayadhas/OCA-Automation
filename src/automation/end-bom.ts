@@ -1,6 +1,7 @@
 import { expect, type Page } from '@playwright/test';
 import { readBomUcid } from '../core/excel';
 import { waitForBlockingOverlay } from '../core/waits';
+import type { PageSnapshot } from '../reporting/html-capture';
 
 export interface BomCapacityDetails {
   billingTier: string;
@@ -24,7 +25,7 @@ const emptyDetails = (): BomCapacityDetails => ({
 });
 
 export class EndBom {
-  constructor(private readonly page: Page) {}
+  constructor(private readonly page: Page, private readonly snapshot?: PageSnapshot) {}
 
   async generateAndAssociate(): Promise<EndBomOutcome> {
     console.log('[STEP] Opening End BOM');
@@ -61,6 +62,8 @@ export class EndBom {
     const endBomId = await readBomUcid(this.page, 'End BOM UCID');
     if (!startBomId) throw new Error('Start BOM UCID was not visible after End BOM generation');
     if (!endBomId) throw new Error('End BOM UCID was not visible after End BOM generation');
+    // The capacity tables are read by position; keep this page so the columns can be checked.
+    await this.snapshot?.('End BOM generated');
     const startDetails = await this.readCapacityDetails('Start BOM UCID');
     const endDetails = await this.readCapacityDetails('End BOM UCID');
 

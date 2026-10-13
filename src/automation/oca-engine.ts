@@ -35,6 +35,14 @@ export async function recoverRequiredMenuSelections(
   await resolveConfigurationErrors(page, components);
 }
 
+/**
+ * Some models have no Smart Chassis section (P83540-B21, DL580 Gen12). Its header id
+ * starts with section_header_smartChassis on the models that have one.
+ */
+export async function hasSmartChassisSection(page: Page): Promise<boolean> {
+  return await page.locator('[id^="section_header_smartChassis" i]').count() > 0;
+}
+
 export class OcaEngine {
   private page?: Page;
   components!: ComponentEngine;
@@ -66,7 +74,7 @@ export class OcaEngine {
       }));
     this.page = model.page;
     await this.options.html?.step(this.page, 'Configuration workspace opened');
-    this.components = new ComponentEngine(this.activePage, model.family);
+    this.components = new ComponentEngine(this.activePage, model.family, (label) => this.snapshot(label));
     this.currentStep = 'Verify Quotation Mode';
     console.log('[STEP] Verifying aaS quotation mode');
     result.quotationMode = await this.measure('Verify quotation mode', () => this.verifyQuotationMode());
@@ -88,8 +96,9 @@ export class OcaEngine {
       this.currentStep = 'Show all component products';
       await this.measure('Show all component products', () => this.components.showAllProducts());
       for (const instruction of instructions) {
-        if (this.shouldSkipSmartChassis(instruction.section, model.generation)) {
-          console.log(`[SKIP] Smart Chassis is not applicable to Gen11 model ${job.modelNumber}`);
+        const skipReason = await this.smartChassisSkipReason(instruction.section, model.generation);
+        if (skipReason) {
+          console.log(`[SKIP] Smart Chassis ${skipReason} (${job.modelNumber})`);
           continue;
         }
         this.currentStep = `Component ${instruction.sequence}: ${instruction.productNumber ?? instruction.section}`;
@@ -121,7 +130,7 @@ export class OcaEngine {
     result.ucid = save.ucid; result.ocaConfigStatus = save.status;
     if (job.generateEndBom) {
       this.currentStep = 'Generate and associate End BOM';
-      const endBom = await this.measure('Generate and associate End BOM', () => new EndBom(this.activePage).generateAndAssociate());
+      const endBom = await this.measure('Generate and associate End BOM', () => new EndBom(this.activePage, (label) => this.snapshot(label)).generateAndAssociate());
       result.endBomStatus = endBom.status;
       result.startBomId = endBom.startBomId;
       result.endBomId = endBom.endBomId;
@@ -144,8 +153,12 @@ export class OcaEngine {
     return result;
   }
 
-  private shouldSkipSmartChassis(section: string, generation: ServerGeneration): boolean {
-    return generation === 11 && /^smart\s*chassis$/i.test(section.trim());
+  /** Why a Smart Chassis instruction does not apply to this model, or '' when it does. */
+  private async smartChassisSkipReason(section: string, generation: ServerGeneration): Promise<string> {
+    if (!/^smart\s*chassis$/i.test(section.trim())) return '';
+    if (generation === 11) return 'is not applicable to Gen11 models';
+    if (!await hasSmartChassisSection(this.activePage)) return 'section is not offered for this model';
+    return '';
   }
 
   private async saveWithRequiredSelectionRecovery() {
@@ -177,6 +190,11 @@ export class OcaEngine {
       return true;
     }
     return false;
+  }
+
+  /** Mid-step diagnostic capture of the active page (no-op when HTML capture is off). */
+  private async snapshot(label: string): Promise<void> {
+    await this.options.html?.diagnostic(this.page, label);
   }
 
   private async measure<T>(label: string, action: () => Promise<T>): Promise<T> {
