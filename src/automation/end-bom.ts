@@ -90,7 +90,40 @@ export class EndBom {
     return { status: 'Generated and associated', startBomId, endBomId, associated: true, startDetails, endDetails };
   }
 
+  /**
+   * Reads a billing-tier table on OCA's End BOM page (#startbom_billingtier_table or
+   * #endbom_billingtier_table). The tables carry hidden columns (Previous Allocated Memory,
+   * Fixed Servers, ...) and hidden duplicate cells, so only visible headers and cells are
+   * paired. Several tiers are joined with "; ".
+   */
+  async readBillingTierTable(tableId: string): Promise<BomCapacityDetails | null> {
+    const table = this.page.locator(`[id=${JSON.stringify(tableId)}]`).first();
+    if (!await table.count()) return null;
+    // Inline callbacks only: named functions inside evaluate get tsx's __name helper, absent in the page.
+    const read = await table.evaluate((element) => ({
+      headers: Array.from(element.querySelectorAll('thead th')).filter((cell) => cell.getClientRects().length > 0)
+        .map((cell) => (cell.textContent ?? '').replace(/\s+/g, ' ').trim()),
+      rows: Array.from(element.querySelectorAll('tbody tr')).filter((row) => row.getClientRects().length > 0)
+        .map((row) => Array.from(row.querySelectorAll('td')).filter((cell) => cell.getClientRects().length > 0)
+          .map((cell) => (cell.textContent ?? '').replace(/\s+/g, ' ').trim())),
+    }));
+    if (!read.headers.length || !read.rows.length) return null;
+    const column = (pattern: RegExp) => {
+      const index = read.headers.findIndex((header) => pattern.test(header));
+      return index < 0 ? '' : read.rows.map((row) => row[index] ?? '').filter(Boolean).join('; ');
+    };
+    return {
+      billingTier: column(/^Billing Tier$/i),
+      billingTierCustomName: column(/Billing Tier Custom Name/i),
+      allocatedMemory: column(/^Allocated Memory/i),
+      server: column(/^Server/i),
+      usedCpuCore: column(/^Used CPU Core/i),
+    };
+  }
+
   private async readCapacityDetails(label: 'Start BOM UCID' | 'End BOM UCID'): Promise<BomCapacityDetails> {
+    const fromTable = await this.readBillingTierTable(label === 'Start BOM UCID' ? 'startbom_billingtier_table' : 'endbom_billingtier_table');
+    if (fromTable) return fromTable;
     const clean = (value: string | null | undefined) => (value ?? '').replace(/\s+/g, ' ').trim();
     const labels = this.page.getByText(label, { exact: false }).filter({ visible: true });
     let anchorBox: Awaited<ReturnType<typeof labels.boundingBox>> = null;

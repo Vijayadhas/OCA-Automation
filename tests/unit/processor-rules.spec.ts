@@ -102,3 +102,12 @@ test('corrects an existing processor quantity that breaks the OCA rule', async (
   await new ComponentEngine(page).satisfyRequiredSection('Processor');
   await expect(page.locator('#item_tr_CPU_cpuX_cpus select')).toHaveValue('2');
 });
+
+test('reads "quantity must be Qty N" as an exact quantity', async ({ page }) => {
+  // P83540-B21: "In 2P configurations, if only 8EDSFF drive cage is selected, then the drive cage quantity must be Qty 2."
+  await page.setContent(processorSection([{ pid: 'CPU', radio: false, select: [0, 1, 2] }]));
+  await page.locator('#choice_header_cpuX_cpus td').evaluate((cell) => cell.insertAdjacentHTML('beforeend',
+    `<div class="choice_messages error_bgd"><ul><li class="message_li"><span class="error_message">In 2P configurations, if only
+      8EDSFF drive cage is selected, then the drive cage quantity must be Qty 2. (<a class="err-lnk" id="cpuX_cpus">Drive Cage</a>)</span></li></ul></div>`));
+  expect(await new ComponentEngine(page).quantityRule('cpuX_cpus')).toEqual({ min: 2, max: 2, even: false });
+});

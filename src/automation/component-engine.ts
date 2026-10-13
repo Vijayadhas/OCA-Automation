@@ -318,9 +318,12 @@ export class ComponentEngine {
       if (targets.length !== 1 || targets[0] !== choiceId) continue;
       const range = text.match(/User Selection:\s*Min\s*(\d+)\s*\/\/\s*Max\s*(\d+)/i);
       const even = /odd quantit(?:y|ies)\b[^.]*\bnot allowed/i.test(text);
-      if (!range && !even) continue;
+      // "... then the drive cage quantity must be Qty 2" (P83540-B21, 8EDSFF in 2P).
+      const exact = text.match(/quantity must be\s*(?:qty\s*)?(\d+)/i);
+      if (!range && !even && !exact) continue;
       rule ??= { min: 0, max: Number.POSITIVE_INFINITY, even: false };
       if (range) { rule.min = Math.max(rule.min, Number(range[1])); rule.max = Math.min(rule.max, Number(range[2])); }
+      if (exact) { rule.min = Math.max(rule.min, Number(exact[1])); rule.max = Math.min(rule.max, Number(exact[1])); }
       rule.even ||= even;
     }
     return rule;
@@ -360,7 +363,13 @@ export class ComponentEngine {
    * any available product of the choice. Returns false when there is nothing to fill.
    */
   private async repairFlaggedChoice(choice: MenuChoice, allowUnnamed: boolean): Promise<boolean> {
-    if (await this.existingSelection(choice.id)) return false;
+    const existing = await this.existingSelection(choice.id);
+    if (existing) {
+      // A selection is present: only its quantity can be brought into OCA's rule here.
+      const quantity = await this.enforceQuantityRule(choice.id, this.page.locator(`[id=${JSON.stringify(existing.rowId)}]`),
+        existing.productNumber, existing.quantity);
+      return quantity !== existing.quantity;
+    }
     const rules = await this.choiceRules(choice.id);
     // Open every section involved first: only rows the page shows can be picked. Rows behind
     // OCA's "Show more" stay hidden, and choosing one timed out (P83540-B21 cables).
@@ -399,8 +408,11 @@ export class ComponentEngine {
     console.log(`[STEP] Filling flagged choice "${choice.title || choice.id}" from ${source}: `
       + [...candidates.values()].map((row) => row.productNumber).join(', '));
     await this.tryRandomCandidates(choice.title || choice.id, [...candidates.values()].map((row) => ({
-      row: this.page.locator(`[id=${JSON.stringify(row.id)}]`), productNumber: row.productNumber,
-    })), (candidate) => this.quantities.set(candidate.row, candidate.productNumber, 1, false, { acceptOffered: true }));
+      row: this.page.locator(`[id=${JSON.stringify(row.id)}]`), productNumber: row.productNumber, choiceId: row.choiceId,
+    })), async (candidate) => {
+      const set = await this.quantities.set(candidate.row, candidate.productNumber, 1, false, { acceptOffered: true });
+      return this.enforceQuantityRule(candidate.choiceId, candidate.row, candidate.productNumber, set);
+    });
     return true;
   }
 
