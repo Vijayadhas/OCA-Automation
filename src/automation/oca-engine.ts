@@ -15,6 +15,7 @@ import { ExceptionRegistry } from '../exceptions/exception-registry';
 import type { ServerGeneration } from './model-search';
 import { SolutionWizard } from './solution-wizard';
 import { StorageFlow } from './storage-flow';
+import { selectAasMode } from './quotation-mode';
 import type { HtmlCapture } from '../reporting/html-capture';
 
 export interface OcaEngineOptions { baseUrl: string; authWaitMs: number; expectedPageText: string; html?: HtmlCapture; }
@@ -212,17 +213,7 @@ export class OcaEngine {
   }
 
   private async selectAasAndVerifyLanding(): Promise<void> {
-    const aaS = this.activePage.getByText(/^aaS$/i).filter({ visible: true }).first();
-    const search = this.activePage.getByRole('textbox', { name: /Search to open UCID or create|Search config/i })
-      .or(this.activePage.locator('#search-config')).first();
-    await expect.poll(async () => {
-      if (await aaS.isVisible({ timeout: 500 }).catch(() => false)) return 'aaS';
-      if (await search.isVisible({ timeout: 500 }).catch(() => false)) return 'search';
-      return '';
-    }, { timeout: Math.max(this.options.authWaitMs, 60_000), message: 'Authenticated OCA landing page' }).not.toBe('');
-    if (await aaS.isVisible({ timeout: 1_000 }).catch(() => false)) await safeClick(aaS);
-    await waitForBlockingOverlay(this.activePage);
-    await expect(search, 'aaS search landing page').toBeVisible({ timeout: 60_000 });
+    await selectAasMode(this.activePage, { landingWaitMs: this.options.authWaitMs });
   }
 
   private async verifyQuotationMode(): Promise<string> {
