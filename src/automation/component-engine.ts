@@ -18,6 +18,19 @@ export class UnsupportedComponentError extends Error {
  */
 export const MAX_RANDOM_PROCESSOR_WATTS = Number(process.env.OCA_MAX_RANDOM_CPU_WATTS ?? 270);
 
+/**
+ * Model-like words in OCA text: tokens holding both a letter and a digit, such as
+ * MR416i, 8SFF, x1, 2P or 1-port. Used to match products a rule describes by name.
+ */
+export function modelWords(text: string): string[] {
+  const isModelWord = (word: string) => /[a-z]/.test(word) && /\d/.test(word);
+  return [...new Set(text.toLowerCase().split(/[^a-z0-9.-]+/)
+    .map((word) => word.replace(/^[.-]+|[.-]+$/g, ''))
+    // "MR416i-o" also counts as "MR416i"; "1-port" stays whole.
+    .flatMap((word) => [word, ...word.split('-')])
+    .filter(isModelWord))];
+}
+
 /** Blank and filler kits are never chosen at random. */
 export function isMemoryBlankProduct(description: string): boolean {
   return /\b(?:memory\s+)?blank(?:\s+kit)?\b/i.test(description);
@@ -351,9 +364,22 @@ export class ComponentEngine {
         }
       }
     }
-    const named = candidates.size > 0;
-    if (!named && allowUnnamed) {
+    let source = candidates.size ? 'the products OCA names' : '';
+    if (!candidates.size) {
+      // OCA often names products by model words instead ("1-port/2-port PCIe/OROC TM controller
+      // (MR416i / MR216i / MR408i)"); keep this choice's products whose descriptions share the most.
+      const ruleWords = new Set((await this.choiceRules(choice.id)).flatMap((rule) => modelWords(rule.text)));
+      const rows = (await this.rowInfo(this.choiceRows(choice.id))).filter(pickable)
+        .map((row) => ({ row, score: modelWords(row.description).filter((word) => ruleWords.has(word)).length }));
+      const best = Math.max(0, ...rows.map((item) => item.score));
+      if (best > 0) {
+        for (const { row, score } of rows) if (score === best) candidates.set(row.id, { ...row, choiceId: choice.id });
+        source = `the products matching OCA's message (${[...ruleWords].join(' ')})`;
+      }
+    }
+    if (!candidates.size && allowUnnamed) {
       for (const row of await this.rowInfo(this.choiceRows(choice.id))) if (pickable(row)) candidates.set(row.id, { ...row, choiceId: choice.id });
+      source = 'its available products';
     }
     if (!candidates.size) return false;
     // Open every section a candidate lives in before reading or changing its quantity.
@@ -361,7 +387,7 @@ export class ComponentEngine {
       const owner = await this.owningSection(choiceId);
       if (owner) await this.open(owner);
     }
-    console.log(`[STEP] Filling flagged choice "${choice.title || choice.id}" from ${named ? 'the products OCA names' : 'its available products'}: `
+    console.log(`[STEP] Filling flagged choice "${choice.title || choice.id}" from ${source}: `
       + [...candidates.values()].map((row) => row.productNumber).join(', '));
     await this.tryRandomCandidates(choice.title || choice.id, [...candidates.values()].map((row) => ({
       row: this.page.locator(`[id=${JSON.stringify(row.id)}]`), productNumber: row.productNumber,

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { ComponentEngine } from '../../src/automation/component-engine';
+import { ComponentEngine, modelWords } from '../../src/automation/component-engine';
 import { menuSection } from './oca-menu-fixture';
 
 // From P83540-B21 (DL580 Gen12): OCA flags Storage Devices and OS Boot Device with one rule that
@@ -51,4 +51,41 @@ test('leaves a flagged choice alone when it already has a selection (an OCA rule
   const before = await page.locator('.item_qty_div').allTextContents();
   await new ComponentEngine(page).satisfyRequiredSection('Storage Devices');
   expect(await page.locator('.item_qty_div').allTextContents()).toEqual(before);
+});
+
+test('extracts model words from OCA text', () => {
+  expect(modelWords('Qty 1 of 1-port/2-port PCIe/OROC TM controller (MR416i / MR216i / MR408i) for 8SFF x1').sort())
+    .toEqual(['1-port', '2-port', '8sff', 'mr216i', 'mr408i', 'mr416i', 'x1']);
+  expect(modelWords('HPE MR416i-o Gen11 x16 Lanes 8GB Cache')).toEqual(expect.arrayContaining(['mr416i-o', 'mr416i', 'gen11']));
+});
+
+// From P83540-B21 after an 8SFF x1 drive cage was chosen: the rule names controllers by model, not part number.
+const controllerRule = `<li class="message_li"><span class="error_message">If Qty 1 8SFF x1 drive cage is selected, then Qty 1 of
+  1-port/2-port PCIe/OROC TM controller (MR416i / MR216i / MR408i) must be selected.
+  (<a class="err-lnk" id="st_cage">Drive Cage</a>, <a class="err-lnk" id="st_cables">Internal Storage Controller Cables</a>,
+  <a class="err-lnk" id="st_ctrl">SAS Controller</a>)</span></li>`;
+
+test('fills flagged choices with the products whose descriptions match the rule\'s model words', async ({ page }) => {
+  await page.setContent(menuSection({ key: 'st', title: 'Storage Devices', choices: [
+    { id: 'st_cage', title: 'Drive Cage', flagged: true, messages: controllerRule, rows: [
+      { pid: 'P80429-B21', description: 'DL580 Gen12 8SFF x1 U.3 Tri-Mode Drive Cage Kit', quantity: 1, select: [0, 1] },
+    ] },
+    { id: 'st_ctrl', title: 'SAS Controller', flagged: true, messages: controllerRule, rows: [
+      { pid: 'P95072-B21', description: 'HPE Smart Array E208e-p SR Gen12 x8 Lanes without Cache SAS 12G PCIe Plug-in Controller', select: [0, 1] },
+      { pid: 'P47781-B21', description: 'HPE MR416i-o Gen11 x16 Lanes 8GB Cache OCP SPDM Storage Controller', select: [0, 1] },
+      { pid: 'P75697-B21', description: 'HPE MR932i-p x32 Lanes PCIe Gen5 SPDM Plug-in Storage Controller', select: [0, 1] },
+    ] },
+    { id: 'st_cables', title: 'Internal Storage Controller Cables', flagged: true, messages: controllerRule, rows: [
+      { pid: 'P89803-B21', description: 'DL580 Gen12 2P/4P 24SFF x1 WM FIO Cable Kit', select: [0, 1] },
+      { pid: 'P80387-B21', description: 'DL580 Gen12 2P/4P 8SFF x1 Tri-Mode Cable Kit', select: [0, 1] },
+    ] },
+  ] }));
+  const engine = new ComponentEngine(page);
+  await engine.satisfyRequiredSection('Storage Devices'); // SAS Controller
+  await engine.satisfyRequiredSection('Storage Devices'); // Cables
+  await expect(quantityOf(page, 'P47781-B21')).toHaveText('1');
+  await expect(quantityOf(page, 'P95072-B21')).toHaveText('0');
+  await expect(quantityOf(page, 'P75697-B21')).toHaveText('0');
+  await expect(quantityOf(page, 'P80387-B21')).toHaveText('1');
+  await expect(quantityOf(page, 'P89803-B21')).toHaveText('0');
 });
