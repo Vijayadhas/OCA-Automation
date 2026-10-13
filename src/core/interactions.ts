@@ -1,6 +1,21 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { waitBeforeAction, waitForBlockingOverlay } from './waits';
 
+/**
+ * Scrolls an element to the middle of the screen and outlines it for a moment, so whoever
+ * watches the browser sees what is about to be selected. Never fails the run: a hidden or
+ * detached element is simply skipped. (No named functions inside: tsx helpers do not exist in the page.)
+ */
+export async function revealForViewer(target: Locator): Promise<void> {
+  await target.first().evaluate((element) => {
+    const html = element as HTMLElement;
+    html.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+    const previous = html.style.outline;
+    html.style.outline = '3px solid #ff8c00';
+    setTimeout(() => { html.style.outline = previous; }, 1_500);
+  }, undefined, { timeout: 5_000 }).catch(() => undefined);
+}
+
 export async function safeClick(locator: Locator) {
   const page = locator.page();
   await waitBeforeAction(page);

@@ -1,5 +1,6 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { waitForBlockingOverlay } from '../core/waits';
+import { revealForViewer } from '../core/interactions';
 
 export interface SupportServiceSelection {
   serviceExperience: string;
@@ -77,6 +78,7 @@ export class SupportServices {
       : candidates[Math.floor(Math.random() * candidates.length)];
     if (!selected) throw new Error(`${label} value from Excel is unavailable: ${preferred}`);
     console.log(`[STEP] ${preferred ? 'Excel' : 'Random'} ${label} selected: ${selected.text}`);
+    await revealForViewer(selected.optionLabel);
     if (await selected.optionLabel.isVisible({ timeout: 2_000 }).catch(() => false)) {
       await selected.optionLabel.click({ force: true });
     } else {

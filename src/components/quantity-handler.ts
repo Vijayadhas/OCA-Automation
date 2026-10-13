@@ -1,6 +1,7 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { escapeRegex, waitForBlockingOverlay } from '../core/waits';
 import type { PageSnapshot } from '../reporting/html-capture';
+import { revealForViewer } from '../core/interactions';
 
 export class QuantityHandler {
   constructor(private readonly page: Page, private readonly snapshot?: PageSnapshot) {}
@@ -22,7 +23,7 @@ export class QuantityHandler {
     // rows, so retain the row identity before performing any action.
     const rowId = await originalRow.getAttribute('id');
     const row = rowId ? this.page.locator(`[id=${JSON.stringify(rowId)}]`) : originalRow;
-    await row.scrollIntoViewIfNeeded();
+    await revealForViewer(row);
     const radio = row.locator('input[type="radio"]').filter({ visible: true }).first();
     let selectedNow = false;
     if (await radio.isVisible({ timeout: 1_000 }).catch(() => false)) {

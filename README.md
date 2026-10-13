@@ -109,6 +109,8 @@ A manually added model with no components uses random Processor, Memory, Smart C
 Supplies selections, exactly like a blank Models-sheet row. Tick **Storage model** or **Solution
 Wizard model** in the model dialog when needed. Only one run can be active at a time because runs
 share the browser profile; **Stop after current job** finishes the active model, then closes the browser.
+In the browser, each product, dropdown, or service option is scrolled into view and outlined in orange
+for a moment just before it is selected, so the run can be followed.
 Set `OCA_UI_PORT` to use a different port. Environment variables and the persistent OCA browser
 profile work exactly as they do for the command-line runner.
 

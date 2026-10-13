@@ -1,6 +1,7 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import type { ComponentInstruction } from '../models/component-instruction';
 import { escapeRegex, waitForBlockingOverlay } from '../core/waits';
+import { revealForViewer } from '../core/interactions';
 import { QuantityHandler } from '../components/quantity-handler';
 import { RadioHandler } from '../components/radio-handler';
 import { ConfigurationHandler } from '../components/configuration-handler';
@@ -55,7 +56,7 @@ export type ExecutionOutcome = 'done' | 'skipped';
 
 interface RowInfo {
   id: string; productNumber: string; description: string; unavailable: boolean;
-  hasRadio: boolean; radioChecked: boolean; hasQuantity: boolean; quantity: string;
+  hasRadio: boolean; radioChecked: boolean; hasQuantity: boolean; quantity: string; visible: boolean;
 }
 
 interface RandomPolicy { quantities: number[]; radioOnly: boolean; limitWatts: boolean }
@@ -286,6 +287,7 @@ export class ComponentEngine {
         radioChecked: Boolean(radio?.checked),
         hasQuantity: Boolean(select || input || display),
         quantity: quantity.replace(/\s+/g, ' ').trim(),
+        visible: row.getClientRects().length > 0,
       };
     }));
   }
@@ -359,10 +361,17 @@ export class ComponentEngine {
    */
   private async repairFlaggedChoice(choice: MenuChoice, allowUnnamed: boolean): Promise<boolean> {
     if (await this.existingSelection(choice.id)) return false;
-    const pickable = (row: RowInfo) => Boolean(row.id && row.productNumber && !row.unavailable
+    const rules = await this.choiceRules(choice.id);
+    // Open every section involved first: only rows the page shows can be picked. Rows behind
+    // OCA's "Show more" stay hidden, and choosing one timed out (P83540-B21 cables).
+    for (const choiceId of new Set([choice.id, ...rules.flatMap((rule) => rule.targets)])) {
+      const owner = await this.owningSection(choiceId);
+      if (owner) await this.open(owner);
+    }
+    const pickable = (row: RowInfo) => Boolean(row.id && row.productNumber && row.visible && !row.unavailable
       && !isMemoryBlankProduct(row.description) && (row.hasQuantity || row.hasRadio));
     const candidates = new Map<string, RowInfo & { choiceId: string }>();
-    for (const rule of await this.choiceRules(choice.id)) {
+    for (const rule of rules) {
       for (const target of new Set([choice.id, ...rule.targets])) {
         for (const row of await this.rowInfo(this.choiceRows(target))) {
           if (pickable(row) && mentionsProduct(rule.text, row.productNumber)) candidates.set(row.id, { ...row, choiceId: target });
@@ -373,7 +382,7 @@ export class ComponentEngine {
     if (!candidates.size) {
       // OCA often names products by model words instead ("1-port/2-port PCIe/OROC TM controller
       // (MR416i / MR216i / MR408i)"); keep this choice's products whose descriptions share the most.
-      const ruleWords = new Set((await this.choiceRules(choice.id)).flatMap((rule) => modelWords(rule.text)));
+      const ruleWords = new Set(rules.flatMap((rule) => modelWords(rule.text)));
       const rows = (await this.rowInfo(this.choiceRows(choice.id))).filter(pickable)
         .map((row) => ({ row, score: modelWords(row.description).filter((word) => ruleWords.has(word)).length }));
       const best = Math.max(0, ...rows.map((item) => item.score));
@@ -387,11 +396,6 @@ export class ComponentEngine {
       source = 'its available products';
     }
     if (!candidates.size) return false;
-    // Open every section a candidate lives in before reading or changing its quantity.
-    for (const choiceId of new Set([...candidates.values()].map((row) => row.choiceId))) {
-      const owner = await this.owningSection(choiceId);
-      if (owner) await this.open(owner);
-    }
     console.log(`[STEP] Filling flagged choice "${choice.title || choice.id}" from ${source}: `
       + [...candidates.values()].map((row) => row.productNumber).join(', '));
     await this.tryRandomCandidates(choice.title || choice.id, [...candidates.values()].map((row) => ({
@@ -517,6 +521,7 @@ export class ComponentEngine {
       case 'checkbox': {
         const row = await this.findProductRow(product!, instruction.description);
         const checkbox = row.locator('input[type="checkbox"]').filter({ visible: true }).first();
+        await revealForViewer(row);
         await expect(checkbox).toBeVisible(); if (!(await checkbox.isChecked())) await checkbox.check({ force: true });
         await expect(checkbox).toBeChecked();
         await waitForBlockingOverlay(this.page);
@@ -564,6 +569,7 @@ export class ComponentEngine {
         && !/please make a selection|^none\.?$/i.test(option.text));
       if (!picked) continue;
       console.log(`[STEP] Required dropdown: ${picked.text}`);
+      await revealForViewer(select);
       await select.selectOption(picked.value, { force: true });
       await waitForBlockingOverlay(this.page);
       return true;
