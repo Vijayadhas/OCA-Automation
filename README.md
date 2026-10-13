@@ -68,7 +68,9 @@ selection. A supplied product with a blank quantity defaults to quantity 1. Rand
 memory selections use quantity 1 or 2; other random selections use quantity 1. When OCA's quantity
 menu does not offer the random quantity, the smallest quantity it offers is used. Random processors
 skip CPUs above `OCA_MAX_RANDOM_CPU_WATTS` (default 270). A section the model does not offer, such as
-Smart Chassis on a DL580 Gen12, is skipped and logged.
+Smart Chassis on a DL580 Gen12, is skipped and logged. When OCA still reports rule errors that the
+automation cannot resolve (usually a rule triggered by a random combination), the model is started
+again from the search with fresh random picks, up to `OCA_RULE_CONFLICT_ATTEMPTS` attempts (default 3).
 Actual selections are written to `Selected Components` in the results workbook. Use the advanced
 `Components` sheet for additional or repeated component instructions.
 

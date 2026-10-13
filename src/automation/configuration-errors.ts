@@ -2,6 +2,11 @@ import type { Page } from '@playwright/test';
 import type { ComponentEngine } from './component-engine';
 import { waitForBlockingOverlay } from '../core/waits';
 
+/** OCA still flags configuration errors that recovery could not resolve (often a rule triggered by a random pick). */
+export class ConfigurationRuleError extends Error {
+  constructor(message: string) { super(message); this.name = 'ConfigurationRuleError'; }
+}
+
 export async function resolveConfigurationErrors(page: Page, components: Pick<ComponentEngine, 'satisfyRequiredSection' | 'satisfyVisibleRequiredControl'>): Promise<void> {
   const errorIcons = page.locator([
     '[title="Error" i]',
@@ -54,7 +59,7 @@ export async function resolveConfigurationErrors(page: Page, components: Pick<Co
   const messages = await page.locator('.choice_messages.error_bgd .error_message').evaluateAll((nodes) => [...new Set(nodes
     .map((node) => (node.textContent ?? '').replace(/\s+/g, ' ').trim()).filter(Boolean))].slice(0, 5)
     .map((text) => (text.length > 400 ? `${text.slice(0, 400)}…` : text)));
-  throw new Error(`Cannot continue to Services while OCA error icons remain: ${unresolved.join('; ')}`
+  throw new ConfigurationRuleError(`Cannot continue to Services while OCA error icons remain: ${unresolved.join('; ')}`
     + (messages.length ? `. OCA messages: ${messages.join(' || ')}` : ''));
 }
 

@@ -6,6 +6,7 @@ import { ExcelWriter } from './excel/excel-writer';
 import { BrowserSession } from './automation/browser-session';
 import { OcaEngine } from './automation/oca-engine';
 import { UnsupportedComponentError } from './automation/component-engine';
+import { ConfigurationRuleError } from './automation/configuration-errors';
 import { createPendingResult } from './models/automation-result';
 import { Logger } from './reporting/logger';
 import { ScreenshotManager } from './reporting/screenshot-manager';
@@ -50,6 +51,8 @@ export async function run(argv = process.argv.slice(2)): Promise<number> {
   };
   process.on('SIGINT', onSigint); process.on('SIGTERM', onSigterm); process.on('message', onMessage);
   let failures = 0;
+  // Attempts per model when OCA rules stay unmet (OCA_RULE_CONFLICT_ATTEMPTS, default 3).
+  const ruleConflictAttempts = Math.max(1, Number(process.env.OCA_RULE_CONFLICT_ATTEMPTS ?? 3));
 
   try {
     const context = await session.start();
@@ -76,7 +79,22 @@ export async function run(argv = process.argv.slice(2)): Promise<number> {
       html.startJob(job.jobId);
       await traces.start(job.jobId);
       try {
-        const result = await engine.processJob(job, retryCount);
+        const result = await (async () => {
+          for (let attempt = 1; ; attempt += 1) {
+            try {
+              return await engine.processJob(job, retryCount);
+            } catch (error) {
+              // Random picks can trigger an OCA rule recovery cannot meet; fresh picks usually avoid it.
+              if (!(error instanceof ConfigurationRuleError) || attempt >= ruleConflictAttempts || stopRequested) throw error;
+              let attemptPage: typeof engine.activePage | undefined;
+              try { attemptPage = engine.activePage; } catch { attemptPage = undefined; }
+              await html.failure(attemptPage, `${engine.currentStep} attempt ${attempt}`);
+              console.log(`[RETRY] ${job.modelNumber}: OCA rules still unmet after attempt ${attempt}/${ruleConflictAttempts}; `
+                + `starting again with new random picks. ${getErrorMessage(error).split('. OCA messages:')[1]?.trim() ?? ''}`);
+              logger.info('Job retried after OCA rule conflict', { jobId: job.jobId, attempt, error: getErrorMessage(error) });
+            }
+          }
+        })();
         result.tracePath = await traces.finish(job.jobId, false);
         await writer.writeResult(result);
         console.log(`[${index + 1}/${jobs.length}] ${job.modelNumber} - Success${result.ucid ? ` - ${result.ucid}` : ''}`);
