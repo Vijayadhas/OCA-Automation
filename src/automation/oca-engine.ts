@@ -11,8 +11,6 @@ import { BillingTier } from './billing-tier';
 import { SaveFlow, SaveRecoveryRequiredError } from './save-flow';
 import { EndBom } from './end-bom';
 import { SupportServices } from './support-services';
-import { ExceptionRegistry } from '../exceptions/exception-registry';
-import type { ServerGeneration } from './model-search';
 import { SolutionWizard } from './solution-wizard';
 import { StorageFlow } from './storage-flow';
 import { selectAasMode } from './quotation-mode';
@@ -35,21 +33,13 @@ export async function recoverRequiredMenuSelections(
   await resolveConfigurationErrors(page, components);
 }
 
-/**
- * Some models have no Smart Chassis section (P83540-B21, DL580 Gen12). Its header id
- * starts with section_header_smartChassis on the models that have one.
- */
-export async function hasSmartChassisSection(page: Page): Promise<boolean> {
-  return await page.locator('[id^="section_header_smartChassis" i]').count() > 0;
-}
-
 export class OcaEngine {
   private page?: Page;
   components!: ComponentEngine;
   currentStep = 'Initialize';
   private authenticated = false;
 
-  constructor(private readonly context: BrowserContext, private readonly exceptions: ExceptionRegistry, private readonly options: OcaEngineOptions) {}
+  constructor(private readonly context: BrowserContext, private readonly options: OcaEngineOptions) {}
 
   get activePage(): Page {
     if (!this.page) throw new Error('OCA page is not initialized');
@@ -74,7 +64,7 @@ export class OcaEngine {
       }));
     this.page = model.page;
     await this.options.html?.step(this.page, 'Configuration workspace opened');
-    this.components = new ComponentEngine(this.activePage, model.family, (label) => this.snapshot(label));
+    this.components = new ComponentEngine(this.activePage, (label) => this.snapshot(label));
     this.currentStep = 'Verify Quotation Mode';
     console.log('[STEP] Verifying aaS quotation mode');
     result.quotationMode = await this.measure('Verify quotation mode', () => this.verifyQuotationMode());
@@ -96,18 +86,15 @@ export class OcaEngine {
       this.currentStep = 'Show all component products';
       await this.measure('Show all component products', () => this.components.showAllProducts());
       for (const instruction of instructions) {
-        const skipReason = await this.smartChassisSkipReason(instruction.section, model.generation);
-        if (skipReason) {
-          console.log(`[SKIP] Smart Chassis ${skipReason} (${job.modelNumber})`);
-          continue;
-        }
         this.currentStep = `Component ${instruction.sequence}: ${instruction.productNumber ?? instruction.section}`;
         console.log(`[STEP] ${this.currentStep}`);
-        const exception = this.exceptions.find(instruction);
-        await this.measure(this.currentStep, async () => {
-          if (exception) await exception.execute(this, instruction);
-          else await this.components.executeGeneric(instruction);
-        });
+        const outcome = await this.measure(this.currentStep, () => this.components.executeGeneric(instruction));
+        if (outcome === 'skipped') {
+          const ignored = instruction.selectionType === 'random' || instruction.selectionType === 'default'
+            ? '' : `; ${instruction.selectionType} ${instruction.productNumber ?? instruction.configurationText ?? ''} was not applied`;
+          console.log(`[SKIP] ${instruction.section} section is not offered for ${job.modelNumber}${ignored}`);
+          continue;
+        }
         executedInstructions.push(instruction);
       }
       result.selectedComponents = executedInstructions.map((item) =>
@@ -151,14 +138,6 @@ export class OcaEngine {
     result.duration = Date.parse(result.endTime) - Date.parse(result.startTime);
     console.log(`[TIME] Job ${job.jobId} (${job.modelNumber}) completed in ${this.formatDuration(Date.now() - jobStartedAt)}`);
     return result;
-  }
-
-  /** Why a Smart Chassis instruction does not apply to this model, or '' when it does. */
-  private async smartChassisSkipReason(section: string, generation: ServerGeneration): Promise<string> {
-    if (!/^smart\s*chassis$/i.test(section.trim())) return '';
-    if (generation === 11) return 'is not applicable to Gen11 models';
-    if (!await hasSmartChassisSection(this.activePage)) return 'section is not offered for this model';
-    return '';
   }
 
   private async saveWithRequiredSelectionRecovery() {

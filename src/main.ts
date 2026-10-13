@@ -5,9 +5,6 @@ import { ExcelReader } from './excel/excel-reader';
 import { ExcelWriter } from './excel/excel-writer';
 import { BrowserSession } from './automation/browser-session';
 import { OcaEngine } from './automation/oca-engine';
-import { ExceptionRegistry } from './exceptions/exception-registry';
-import { P72221SmartChassisHandler } from './exceptions/p72221-smart-chassis-handler';
-import { P74787AutomaticDependencyHandler } from './exceptions/p74787-automatic-dependency-handler';
 import { UnsupportedComponentError } from './automation/component-engine';
 import { createPendingResult } from './models/automation-result';
 import { Logger } from './reporting/logger';
@@ -56,9 +53,9 @@ export async function run(argv = process.argv.slice(2)): Promise<number> {
 
   try {
     const context = await session.start();
-    const engine = new OcaEngine(context, new ExceptionRegistry([
-      new P74787AutomaticDependencyHandler(), new P72221SmartChassisHandler(),
-    ]), { baseUrl: env.baseUrl, authWaitMs: env.authWaitMs, expectedPageText: env.expectedPageText, html });
+    const engine = new OcaEngine(context, {
+      baseUrl: env.baseUrl, authWaitMs: env.authWaitMs, expectedPageText: env.expectedPageText, html,
+    });
 
     for (let index = 0; index < jobs.length; index += 1) {
       const job = jobs[index];

@@ -1,87 +1,8 @@
 import { type Page } from '@playwright/test';
-import * as XLSX from 'xlsx';
-import { env } from '../config/env';
 import { waitForBlockingOverlay } from './waits';
-import type { ModelSpec } from '../models/model.types';
-
-export type EndBomResult = {
-  modelNo: string;
-  processor: string;
-  memory: string;
-  networkCard?: string;
-  service?: string;
-  startBomUcid: string;
-  endBomUcid: string;
-  associateEndBom: 'Yes' | 'No';
-  status: 'Pass' | 'Fail';
-};
-
-export function newResult(spec: ModelSpec): EndBomResult {
-  return {
-    modelNo: spec.modelNumber,
-    processor: spec.selectedProcessor,
-    memory: spec.selectedMemory,
-    networkCard: spec.networkCard,
-    service: spec.service,
-    startBomUcid: '',
-    endBomUcid: '',
-    associateEndBom: 'No',
-    status: 'Fail',
-  };
-}
 
 export function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error).split('\n')[0];
-}
-
-export function normalizeEndBomHeaders(existingHeaders: (string | number | null)[]) {
-  const desiredHeaders = ['S.No', 'Model no', 'Processor', 'Memory', 'Start BOM UCID', 'End BOM UCID', 'Associate End BOM', 'Status'];
-  const normalized = existingHeaders.map((header) => {
-    const value = String(header ?? '').replace(/\s+/g, ' ').trim();
-    if (/^End COM UCID$/i.test(value)) {
-      return 'End BOM UCID';
-    }
-    if (/^Associate END BOM$/i.test(value)) {
-      return 'Associate End BOM';
-    }
-    return value;
-  });
-  return desiredHeaders.map((header) => normalized.find((existingHeader) => existingHeader === header) ?? header);
-}
-
-export function updateEndBomWorkbook(result: EndBomResult) {
-  try {
-    const workbook = XLSX.readFile(env.endBomWorkbookPath);
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-    const rows = XLSX.utils.sheet_to_json<(string | number | null)[]>(sheet, { header: 1, defval: null });
-    const headers = normalizeEndBomHeaders(rows[0] ?? []);
-    rows[0] = headers;
-    const modelNoColumn = headers.indexOf('Model no');
-    const modelRows = rows.slice(1).filter((row) => String(row[modelNoColumn] ?? '').trim().length > 0);
-    let rowIndex = modelRows.findIndex((row) => String(row[modelNoColumn] ?? '').trim() === result.modelNo);
-    if (rowIndex === -1) {
-      rowIndex = modelRows.length;
-      modelRows[rowIndex] = [];
-    }
-    const row = modelRows[rowIndex] ?? [];
-    row[headers.indexOf('Model no')] = result.modelNo;
-    row[headers.indexOf('Processor')] = result.processor;
-    row[headers.indexOf('Memory')] = result.memory;
-    row[headers.indexOf('Start BOM UCID')] = result.startBomUcid;
-    row[headers.indexOf('End BOM UCID')] = result.endBomUcid;
-    row[headers.indexOf('Associate End BOM')] = result.associateEndBom;
-    row[headers.indexOf('Status')] = result.status;
-    modelRows[rowIndex] = row;
-    modelRows.forEach((currentRow, index) => {
-      currentRow[headers.indexOf('S.No')] = index + 1;
-    });
-    workbook.Sheets[sheetName] = XLSX.utils.aoa_to_sheet([headers, ...modelRows]);
-    XLSX.writeFile(workbook, env.endBomWorkbookPath);
-    console.log('[INFO] End BOM validation workbook updated:', env.endBomWorkbookPath);
-  } catch (error) {
-    console.log('[WARN] End BOM validation workbook update skipped:', getErrorMessage(error));
-  }
 }
 
 const normalizePageText = (text: string | null | undefined) => (text ?? '').replace(/\s+/g, ' ').trim();

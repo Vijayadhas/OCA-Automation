@@ -4,7 +4,7 @@ Production-oriented, data-driven Playwright automation for HPE One Config Advanc
 enabled jobs and component instructions from Excel, reuses one authenticated persistent Chromium
 session, processes each job independently, and writes every result immediately to a new workbook.
 
-The original working Playwright tests remain unchanged under `tests/` and can still be run separately.
+Offline unit tests live under `tests/unit` (`npm run test:unit`).
 
 Development happens on a machine without OCA access and is run on a separate system. See
 [`docs/DEVELOPMENT_WORKFLOW.md`](docs/DEVELOPMENT_WORKFLOW.md) for how to share HTML, report errors,
@@ -64,8 +64,11 @@ network adapter, switches, and—when Menu is available—controller chassis, no
 In the simple `Models` worksheet, a supplied processor, memory, Smart Chassis, chassis configuration,
 power supply, quantity, or Service value is used as entered. Leave a component blank or enter
 `Random` to use automatic random selection. Enter `Default` to retain OCA's existing component
-selection. A supplied product with a blank quantity defaults to quantity 1. Random processor,
-memory, and power-supply selections use quantity 1 or 2; random Smart Chassis uses quantity 1.
+selection. A supplied product with a blank quantity defaults to quantity 1. Random processor and
+memory selections use quantity 1 or 2; other random selections use quantity 1. When OCA's quantity
+menu does not offer the random quantity, the smallest quantity it offers is used. Random processors
+skip CPUs above `OCA_MAX_RANDOM_CPU_WATTS` (default 270). A section the model does not offer, such as
+Smart Chassis on a DL580 Gen12, is skipped and logged.
 Actual selections are written to `Selected Components` in the results workbook. Use the advanced
 `Components` sheet for additional or repeated component instructions.
 
@@ -82,8 +85,7 @@ job-level fields. Supported selection types are `radio`, `quantity`, `checkbox`,
 `default`. Selectors do not belong in Excel. Products are found from the visible section and exact
 product number, with optional description disambiguation.
 
-`automatic` verifies OCA's committed quantity without modifying it. This is mandatory for the known
-`P74787-B21` processor dependency.
+`automatic` verifies OCA's committed quantity without modifying it.
 
 ## Run
 
@@ -166,29 +168,17 @@ SIGTERM requests a graceful stop after the current job. One failed job does not 
 - `src/app` — CLI argument parsing
 - `src/automation` — session, search, generic engine, billing, save, and End BOM flows
 - `src/components` — radio, quantity, configuration, and automatic-dependency behavior
-- `src/exceptions` — small registry for genuinely unusual interactions
 - `src/excel` — strict input parsing/validation and incremental output writing
-- `src/reporting` — JSONL logs, screenshots, and traces
+- `src/reporting` — JSONL logs, screenshots, HTML captures, and traces
 - `src/models` — job, instruction, source, and result contracts
 
-The persistent browser/manual authentication, overlay waits, exact CTO-card selection, stable row
-quantity verification, save acknowledgement, and End BOM UCID extraction are derived from the proven
-existing page/test logic. Model data now lives in Excel rather than complete per-model classes.
-
-Known special behavior stays isolated: `P72221-B21` uses its Smart Chassis handler and asserts that
-`P72227-B21` is not selected; `P74787-B21` is verification-only. Add future exceptions by implementing
-`ComponentExceptionHandler` and registering the handler, without adding model-number switches to the
-generic engine.
+The engine contains no model numbers or model-specific element ids. OCA renders every model's
+component menu the same way: a section header (`#section_header_<key>`) with a visible title, choices
+with titles (`#choice_title_<choice>`), and item rows (`tr.item_tr[data-elementid="<choice>"]`). Only
+the keys and choice ids differ between models, so the engine finds a section by its title (Processor,
+Memory, Smart Chassis, Power Supplies, or any other) and uses its main choice: the choice titled like
+the section, otherwise the first choice with rows. See `ComponentEngine` in
+`src/automation/component-engine.ts`.
 
 Reference-based sources (UCID, BOM, Smart Template, API, or database) are represented in the typed job
 model but intentionally not executed in this Excel-detailed MVP.
-
-## Legacy Playwright tests
-
-```bash
-npx playwright test
-npx playwright test tests/oca-config2-P72176-B21-fresh-recording.spec.ts --headed
-```
-
-These commands require live OCA access and manual authentication. Do not run them against production
-without explicit confirmation.

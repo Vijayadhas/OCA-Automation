@@ -1,7 +1,9 @@
 import { expect, type Page } from '@playwright/test';
+import { env } from '../config/env';
 import { waitForBlockingOverlay } from '../core/waits';
 
-export const BOM_CONFIG_NAME = 'OCA Config 2';
+/** The configuration entry in OCA's BOM tab (OCA_EXPECTED_PAGE_TEXT, default 'OCA Config 2'). */
+export const BOM_CONFIG_NAME = env.expectedPageText;
 
 export class BillingTier {
   constructor(private readonly page: Page) {}

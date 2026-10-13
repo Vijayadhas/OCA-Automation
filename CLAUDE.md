@@ -20,12 +20,18 @@ for features and `docs/DEVELOPMENT_WORKFLOW.md` for the development loop.
 - `src/automation` — OCA flows: model search, component engine, save, support services, billing
   tier, End BOM, solution wizard, storage
 - `src/components` — radio, quantity, configuration, automatic-dependency handlers
-- `src/exceptions` — model-specific handlers registered in `exception-registry.ts`; do not add
-  model-number switches to the generic engine
 - `src/excel` — input parsing/validation and results writing
-- `src/core`, `src/pages` — shared waits, interactions, and page helpers
-- `tests/unit` — offline unit tests; `tests/*.spec.ts` and `old Working test classes/` are legacy
-  live-OCA recordings kept for reference
+- `src/core` — shared waits, interactions, page shim, BOM UCID parsing
+- `tests/unit` — offline unit tests; `tests/unit/oca-menu-fixture.ts` builds OCA menu markup
+
+## Generic by design
+
+The user requires the automation to work for every model with nothing hardcoded: no model numbers,
+part numbers, server families, or model-specific element ids in `src`. Find OCA elements by their
+visible titles and by OCA's shared structure (section header → choice title → item rows), as
+`ComponentEngine` does. A section a model does not offer is skipped. Build every new selector from
+captured HTML of at least two models. Known exceptions still to generalise: the Solution Wizard and
+Storage flows use fixed choice ids.
 
 ## Commands (run system only)
 

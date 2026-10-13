@@ -22,7 +22,7 @@ test('resolves every marked section, including errors revealed by earlier select
 test('resolves a required dropdown outside component headers', async ({ page }) => {
   await page.setContent(`<span aria-label="Error">!</span><select onchange="document.querySelector('span').remove()">
     <option value="">Please make a selection</option><option value="required">Required choice</option></select>`);
-  await resolveConfigurationErrors(page, new ComponentEngine(page, 'DL360'));
+  await resolveConfigurationErrors(page, new ComponentEngine(page));
   await expect(page.locator('select')).toHaveValue('required');
 });
 

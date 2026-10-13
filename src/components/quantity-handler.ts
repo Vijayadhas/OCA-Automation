@@ -9,7 +9,15 @@ export class QuantityHandler {
     return this.readCommitted(row, productNumber);
   }
 
-  async set(originalRow: Locator, productNumber: string, quantity: number, requireStableVerification = true): Promise<void> {
+  /**
+   * Sets a row's quantity and returns the quantity committed. With acceptOffered, a menu
+   * that does not offer the wanted quantity commits the smallest one it does offer
+   * (OCA can allow only some quantities, e.g. memory in pairs).
+   */
+  async set(
+    originalRow: Locator, productNumber: string, quantity: number, requireStableVerification = true,
+    options: { acceptOffered?: boolean } = {},
+  ): Promise<number> {
     // Random choices arrive as nth() locators. Recalculation can reorder those
     // rows, so retain the row identity before performing any action.
     const rowId = await originalRow.getAttribute('id');
@@ -39,7 +47,11 @@ export class QuantityHandler {
       console.log(`[INFO] ${productNumber} is already selected with quantity ${quantity}; leaving it unchanged`);
     } else {
       try {
-        await this.write(row, quantity, productNumber);
+        const written = await this.write(row, quantity, productNumber, options.acceptOffered ?? false);
+        if (written !== quantity) {
+          console.log(`[INFO] ${productNumber}: quantity ${quantity} is not offered; using the smallest offered quantity ${written}`);
+          quantity = written;
+        }
       } catch (error) {
         // A quantity click can cause an immediate row rebuild. Confirm the refreshed
         // committed row before treating a missing dropdown option as a real failure.
@@ -54,7 +66,7 @@ export class QuantityHandler {
       const observed = await this.readCommitted(row, productNumber);
       if (observed === String(quantity)) console.log(`[INFO] ${productNumber} quantity committed as ${quantity}`);
       else console.log(`[WARN] ${productNumber} quantity reads as ${observed || '<empty>'} after selecting ${quantity}; continuing because OCA can expose stale Memory row text after recalculation`);
-      return;
+      return quantity;
     }
     let stable = 0;
     const observed = new Set<string>();
@@ -69,6 +81,7 @@ export class QuantityHandler {
     } catch (error) {
       throw new Error(`${productNumber} quantity must remain ${quantity}; observed: ${[...observed].join(', ') || '<unreadable>'}`, { cause: error });
     }
+    return quantity;
   }
 
   async verify(row: Locator, productNumber: string, quantity: number): Promise<void> {
@@ -78,18 +91,30 @@ export class QuantityHandler {
     }).toBe(String(quantity));
   }
 
-  private async write(row: Locator, quantity: number, productNumber: string): Promise<void> {
+  /** Smallest positive whole quantity among option texts, if any. */
+  private smallestOffered(texts: string[]): number | undefined {
+    const values = texts.map((text) => text.trim()).filter((text) => /^\d+$/.test(text)).map(Number).filter((value) => value > 0);
+    return values.length ? Math.min(...values) : undefined;
+  }
+
+  private async write(row: Locator, quantity: number, productNumber: string, acceptOffered: boolean): Promise<number> {
     const value = String(quantity);
     const select = row.locator('select').filter({ visible: true }).first();
     if (await select.isVisible({ timeout: 1_000 }).catch(() => false)) {
       const option = select.locator('option').filter({ hasText: new RegExp(`^\\s*${escapeRegex(value)}\\s*$`) }).first();
-      if (!(await option.count())) throw new Error(`Quantity option ${value} is unavailable`);
-      await select.selectOption(await option.getAttribute('value') ?? value);
-      return;
+      if (await option.count()) {
+        await select.selectOption(await option.getAttribute('value') ?? value);
+        return quantity;
+      }
+      const fallback = acceptOffered ? this.smallestOffered(await select.locator('option').allTextContents()) : undefined;
+      if (fallback === undefined) throw new Error(`Quantity option ${value} is unavailable`);
+      const fallbackOption = select.locator('option').filter({ hasText: new RegExp(`^\\s*${fallback}\\s*$`) }).first();
+      await select.selectOption(await fallbackOption.getAttribute('value') ?? String(fallback));
+      return fallback;
     }
     const input = row.locator('input[type="number"], input[type="text"]').filter({ visible: true }).first();
     if (await input.isVisible({ timeout: 1_000 }).catch(() => false)) {
-      await input.fill(value); await input.press('Tab'); return;
+      await input.fill(value); await input.press('Tab'); return quantity;
     }
     // Prefer the inner clickable quantity div. Selecting the outer td and clicking
     // its right edge is unreliable after OCA rebuilds a dHCI choice table.
@@ -122,26 +147,32 @@ export class QuantityHandler {
         console.log(`[INFO] Entering quantity ${value} through OCA quantity popup textbox`);
         await popupTextBox.fill(value);
         await popupTextBox.press('Enter');
-        return;
+        return quantity;
       }
-      const menuOption = await this.findNearestOpenOption(attemptTarget, value).catch(() => null);
-      if (menuOption) {
-        const optionBox = await menuOption.boundingBox();
-        if (optionBox) await this.page.mouse.click(optionBox.x + optionBox.width / 2, optionBox.y + optionBox.height / 2);
-        else await menuOption.click({ force: true });
-        return;
-      }
-      console.log(`[WARN] Quantity option ${value} did not open on attempt ${attempt}/3; retrying`);
-      // Keep the page as the last click left it, before Escape closes anything that did open.
-      if (attempt === 3) {
-        await this.snapshot?.(`WARN-Quantity ${value} did not open for ${productNumber}`);
+      let menuOption = await this.findNearestOpenOption(attemptTarget, value).catch(() => null);
+      let chosen = quantity;
+      if (!menuOption) {
         // The menu may have opened without this value (OCA can allow only some quantities).
         offered = (await this.page.locator([
           '.selecter.open .selecter-item', '.selecter-options:visible .selecter-item',
           '[role="listbox"]:visible [role="option"]', '.ui-menu:visible .ui-menu-item',
         ].join(', ')).filter({ visible: true }).allTextContents().catch(() => [] as string[]))
           .map((text) => text.replace(/\s+/g, ' ').trim()).filter(Boolean);
+        const fallback = acceptOffered ? this.smallestOffered(offered) : undefined;
+        if (fallback !== undefined) {
+          menuOption = await this.findNearestOpenOption(attemptTarget, String(fallback)).catch(() => null);
+          chosen = fallback;
+        }
       }
+      if (menuOption) {
+        const optionBox = await menuOption.boundingBox();
+        if (optionBox) await this.page.mouse.click(optionBox.x + optionBox.width / 2, optionBox.y + optionBox.height / 2);
+        else await menuOption.click({ force: true });
+        return chosen;
+      }
+      console.log(`[WARN] Quantity option ${value} did not open on attempt ${attempt}/3; retrying`);
+      // Keep the page as the last click left it, before Escape closes anything that did open.
+      if (attempt === 3) await this.snapshot?.(`WARN-Quantity ${value} did not open for ${productNumber}`);
       await this.page.keyboard.press('Escape').catch(() => undefined);
       await this.page.waitForTimeout(500);
     }

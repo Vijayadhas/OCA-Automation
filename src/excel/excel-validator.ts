@@ -40,9 +40,6 @@ export class ExcelValidator {
       if (instruction.selectionType === 'quantity' && (!Number.isInteger(instruction.quantity) || Number(instruction.quantity) < 0)) {
         issues.push(`${prefix}: Quantity must be a non-negative integer`);
       }
-      if (instruction.selectionType === 'random' && !/^(processor|memory|smart chassis|power supplies)$/i.test(instruction.section)) {
-        issues.push(`${prefix}: random selection is supported only for Processor, Memory, Smart Chassis, or Power Supplies`);
-      }
       if (instruction.selectionType === 'configuration' && !instruction.configurationText) {
         issues.push(`${prefix}: Configuration Text is required`);
       }

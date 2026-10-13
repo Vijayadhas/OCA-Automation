@@ -2,13 +2,8 @@ import { expect, type BrowserContext, type Locator, type Page } from '@playwrigh
 import { safeClick } from '../core/interactions';
 import { escapeRegex, waitForBlockingOverlay } from '../core/waits';
 
-export type ServerGeneration = 11 | 12 | 'unknown';
-export type ServerFamily = 'DL360' | 'DL380' | 'ML350' | 'unknown';
-
 export interface ModelSearchResult {
   page: Page;
-  generation: ServerGeneration;
-  family: ServerFamily;
   description: string;
 }
 
@@ -17,17 +12,6 @@ export interface ModelSearchRequest {
   description?: string;
   isSolution: boolean;
   integrationRackPartNumber?: string;
-}
-
-export function detectServerGeneration(description: string): ServerGeneration {
-  if (/\b(?:gen(?:eration)?\s*[-#:]?\s*)12\b/i.test(description)) return 12;
-  if (/\b(?:gen(?:eration)?\s*[-#:]?\s*)11\b/i.test(description)) return 11;
-  return 'unknown';
-}
-
-export function detectServerFamily(description: string): ServerFamily {
-  const match = description.match(/\b(DL360|DL380|ML350)\b/i);
-  return match ? match[1].toUpperCase() as Exclude<ServerFamily, 'unknown'> : 'unknown';
 }
 
 export class ModelSearch {
@@ -61,9 +45,6 @@ export class ModelSearch {
       // result-card templates show only the chosen description and omit its SKU.
       console.log(`[WARN] Configurable card omitted model number ${modelNumber}; continuing from the exact selected dropdown option`);
     }
-    const generation = detectServerGeneration(cardText);
-    const family = detectServerFamily(cardText);
-    console.log(`[INFO] Model type from search description: ${family === 'unknown' ? 'Unknown family' : family} ${generation === 'unknown' ? 'Unknown generation' : `Gen${generation}`}`);
     if (!request.isSolution) await this.selectIntegrationRack(page, card, request.integrationRackPartNumber);
     console.log(`[STEP] Exact ${/\bCTO\b/i.test(cardText) ? 'CTO ' : ''}configurable card found for ${modelNumber}; clicking Customize`);
     const popup = this.context.waitForEvent('page', { timeout: 20_000 }).catch(() => null);
@@ -75,7 +56,7 @@ export class ModelSearch {
     await waitForBlockingOverlay(configPage);
     await this.waitForConfigWorkspace(configPage);
     console.log(`[STEP] OCA configuration workspace is ready for ${modelNumber}`);
-    return { page: configPage, generation, family, description: cardText };
+    return { page: configPage, description: cardText };
   }
 
   /** jQuery UI autocomplete's live region: "No search results." or "N results are available…". */
@@ -192,7 +173,6 @@ export class ModelSearch {
 
   private async waitForConfigWorkspace(page: Page): Promise<void> {
     const controls = [
-      page.locator('#section_header_smartChassisSection, #section_header_smartChassis').filter({ visible: true }).first(),
       page.locator('[id^="section_header_"]').filter({ visible: true }).first(),
       page.getByRole('link', { name: 'Services', exact: true }).filter({ visible: true }).first(),
       page.locator('input[placeholder*="Search config" i], input[aria-label*="Search config" i]').filter({ visible: true }).first(),
