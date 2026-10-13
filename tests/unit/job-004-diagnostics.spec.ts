@@ -40,3 +40,35 @@ test('an explicit quantity that is not offered still fails', async ({ page }) =>
   await expect(new QuantityHandler(page).set(page.locator('tr.item_tr'), 'DIMM', 1, false))
     .rejects.toThrow('(visible options: 0, 2, 4)');
 });
+
+test('finds Power Supplies as a choice inside "Power and Cooling" (DL580 Gen12)', async ({ page }) => {
+  // The section titled Power Supplies on DL360 is "Power and Cooling" on DL580, and an earlier
+  // "Manufacturing Services" section has a key that also starts with "power".
+  await page.setContent(menuSection({ key: 'powerCordsRemoval', title: 'Manufacturing Services', collapsed: true, choices: [
+    { id: 'powerCordsRemoval_powerCordsRemoval', title: 'Manufacturing Services', rows: [{ pid: 'MFG', select: [0, 1] }] },
+  ] }) + menuSection({ key: 'power', title: 'Power and Cooling', collapsed: true, choices: [
+    { id: 'power_powerSlots', title: 'Power Supplies', rows: [{ pid: 'PSU', description: '1800W Power Supply', select: [0, 1] }] },
+    { id: 'power_powerCords', title: 'Power Cords', rows: [{ pid: 'CORD', select: [0, 1] }] },
+  ] }));
+  const engine = new ComponentEngine(page);
+  expect(await engine.findSection('Power Supplies')).toEqual({ key: 'power', title: 'Power and Cooling', choiceId: 'power_powerSlots' });
+  const instruction = { jobId: 'test', section: 'Power Supplies', selectionType: 'random' as const, sequence: 40 };
+  expect(await engine.executeGeneric(instruction)).toBe('done');
+  expect(instruction).toMatchObject({ productNumber: 'PSU', quantity: 1 });
+  await expect(page.locator('#body_powerCordsRemoval')).toBeHidden();
+  await expect(page.locator('#item_tr_CORD_power_powerCords select')).toHaveValue('0');
+});
+
+test('reads OCA popup-menu quantities and takes the smallest when 1 is not offered', async ({ page }) => {
+  // Captured on P83540-B21: a 128GB DIMM's menu offers 0, 2, 4, 8, 16, 24, 32 only.
+  await page.setContent(`<table><tr class="item_tr" id="item_tr_P69730-F21_m_slots">
+    <td><span class="_pid">P69730-F21</span></td>
+    <td class="item_qty"><div class="item_qty_div" onclick="document.getElementById('action_div').style.display = 'block'">0</div></td></tr></table>
+    <div id="action_div" class="popup-menu" style="position: absolute; top: 120px; left: 200px; display: none">
+      <ul id="action_ul" class="popup-menu-body compact">${[0, 2, 4, 8, 16, 24, 32].map((value) => `<li class="menu-item compact"
+        onclick="document.querySelector('.item_qty_div').textContent = '${value}'; document.getElementById('action_div').style.display = 'none'">
+        <a id="${value}" name="${value}">${value}</a></li>`).join('')}</ul></div>`);
+  const quantity = await new QuantityHandler(page).set(page.locator('tr.item_tr'), 'P69730-F21', 1, true, { acceptOffered: true });
+  expect(quantity).toBe(2);
+  await expect(page.locator('.item_qty_div')).toHaveText('2');
+});

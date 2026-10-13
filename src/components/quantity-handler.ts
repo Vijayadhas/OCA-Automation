@@ -156,6 +156,8 @@ export class QuantityHandler {
         offered = (await this.page.locator([
           '.selecter.open .selecter-item', '.selecter-options:visible .selecter-item',
           '[role="listbox"]:visible [role="option"]', '.ui-menu:visible .ui-menu-item',
+          // OCA's quantity popup: <div id="action_div" class="popup-menu"><li class="menu-item"><a id="2">2</a>.
+          '.popup-menu:visible .menu-item',
         ].join(', ')).filter({ visible: true }).allTextContents().catch(() => [] as string[]))
           .map((text) => text.replace(/\s+/g, ' ').trim()).filter(Boolean);
         const fallback = acceptOffered ? this.smallestOffered(offered) : undefined;
@@ -190,6 +192,7 @@ export class QuantityHandler {
       `[role="listbox"]:visible [role="option"][data-value="${value}"]`,
       `[role="listbox"]:visible [role="option"]`,
       `.ui-menu:visible .ui-menu-item`,
+      `.popup-menu:visible .menu-item`,
     ].join(', ')).filter({ visible: true, hasText: exact });
     await expect.poll(() => options.count(), { timeout: 5_000, message: `Visible quantity option ${value}` }).toBeGreaterThan(0);
 

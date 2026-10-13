@@ -29,7 +29,8 @@ export function isMemoryBlankProduct(description: string): boolean {
  * and item rows `tr.item_tr[data-elementid="<choice>"]` (row ids end in `_<choice>`), where
  * `<choice>` starts with `<key>_`. Keys and choice ids differ between models; titles do not.
  */
-export interface MenuSection { key: string; title: string }
+/** A section; choiceId is set when the section was found through a choice of that title. */
+export interface MenuSection { key: string; title: string; choiceId?: string }
 export interface MenuChoice { id: string; title: string; rows: number }
 export interface Selection { productNumber: string; description: string; quantity: number }
 export type ExecutionOutcome = 'done' | 'skipped';
@@ -110,14 +111,28 @@ export class ComponentEngine {
     return found.filter((section, index) => section.key && found.findIndex((other) => other.key === section.key) === index);
   }
 
-  /** Finds a visible section by its title: exact first, then one whose title contains every word. */
+  /**
+   * Finds a visible section by its title: exact first, then one whose title contains every word.
+   * Failing that, a choice with that title identifies its section: on a DL580 Gen12 the
+   * "Power Supplies" choice sits in a section titled "Power and Cooling".
+   */
   async findSection(sectionName: string): Promise<MenuSection | null> {
     const wanted = normalize(sectionName);
     const words = wanted.match(/[a-z0-9]+/g) ?? [];
     const visible = (await this.sections()).filter((section) => section.visible);
     const match = visible.find((section) => normalize(section.title) === wanted)
       ?? visible.find((section) => words.length > 0 && words.every((word) => normalize(section.title).includes(word)));
-    return match ? { key: match.key, title: match.title } : null;
+    if (match) return { key: match.key, title: match.title };
+    const titledChoices = await this.page.locator('[id^="choice_title_"]').evaluateAll((nodes) => nodes.map((node) => ({
+      id: node.id.slice('choice_title_'.length), title: (node.textContent ?? '').replace(/\s+/g, ' ').trim(),
+    })));
+    for (const choice of titledChoices.filter((item) => normalize(item.title) === wanted)) {
+      // The owning section's key is the longest key that prefixes the choice id.
+      const owner = visible.filter((section) => choice.id.startsWith(`${section.key}_`))
+        .sort((a, b) => b.key.length - a.key.length)[0];
+      if (owner) return { key: owner.key, title: owner.title, choiceId: choice.id };
+    }
+    return null;
   }
 
   /** Choices of a section in page order, with their item-row counts. */
@@ -149,6 +164,8 @@ export class ComponentEngine {
    */
   async mainChoice(section: MenuSection): Promise<MenuChoice | null> {
     const withRows = (await this.choices(section)).filter((choice) => choice.rows > 0);
+    const named = withRows.find((choice) => choice.id === section.choiceId);
+    if (named) return named;
     const title = normalize(section.title);
     return withRows.find((choice) => normalize(choice.title) === title)
       ?? withRows.find((choice) => choice.title && (normalize(choice.title).includes(title) || title.includes(normalize(choice.title))))
