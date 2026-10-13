@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { ComponentEngine, modelWords } from '../../src/automation/component-engine';
+import { ComponentEngine, mentionsProduct, modelWords } from '../../src/automation/component-engine';
 import { menuSection } from './oca-menu-fixture';
 
 // From P83540-B21 (DL580 Gen12): OCA flags Storage Devices and OS Boot Device with one rule that
@@ -88,4 +88,12 @@ test('fills flagged choices with the products whose descriptions match the rule\
   await expect(quantityOf(page, 'P75697-B21')).toHaveText('0');
   await expect(quantityOf(page, 'P80387-B21')).toHaveText('1');
   await expect(quantityOf(page, 'P89803-B21')).toHaveText('0');
+});
+
+test('a part number counts as named only as a whole word', () => {
+  const text = '- 8SFF x1 Drive Cage (P80429-B21) - NS204i-u V2 controller along with Front NS204i-u Enable kit';
+  expect(mentionsProduct(text, 'P80429-B21')).toBe(true);
+  expect(mentionsProduct(text, 'NS204')).toBe(false);
+  expect(mentionsProduct(text, 'P80429')).toBe(false);
+  expect(mentionsProduct('Select 804398-B21.', '804398-B21')).toBe(true);
 });

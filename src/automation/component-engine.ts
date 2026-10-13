@@ -31,6 +31,11 @@ export function modelWords(text: string): string[] {
     .filter(isModelWord))];
 }
 
+/** True when text names a part number as a whole word ("(P80429-B21)"), not inside a longer name ("NS204i-u"). */
+export function mentionsProduct(text: string, productNumber: string): boolean {
+  return new RegExp(`(^|[^A-Za-z0-9])${escapeRegex(productNumber)}(?![A-Za-z0-9-])`, 'i').test(text);
+}
+
 /** Blank and filler kits are never chosen at random. */
 export function isMemoryBlankProduct(description: string): boolean {
   return /\b(?:memory\s+)?blank(?:\s+kit)?\b/i.test(description);
@@ -360,7 +365,7 @@ export class ComponentEngine {
     for (const rule of await this.choiceRules(choice.id)) {
       for (const target of new Set([choice.id, ...rule.targets])) {
         for (const row of await this.rowInfo(this.choiceRows(target))) {
-          if (pickable(row) && rule.text.includes(row.productNumber)) candidates.set(row.id, { ...row, choiceId: target });
+          if (pickable(row) && mentionsProduct(rule.text, row.productNumber)) candidates.set(row.id, { ...row, choiceId: target });
         }
       }
     }
