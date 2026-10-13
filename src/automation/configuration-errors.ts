@@ -6,7 +6,9 @@ export async function resolveConfigurationErrors(page: Page, components: Pick<Co
   const errorIcons = page.locator([
     '[title="Error" i]',
     '[aria-label="Error" i]',
-    '.dqe-status-icon-14',
+    // OCA puts dqe-status-icon-14 on every status icon; only img-alert is an error
+    // (img-warning and img-info are advisory and must not block Services).
+    '.img-alert.dqe-status-icon-14',
   ].join(', ')).filter({ visible: true });
 
   for (let attempt = 1; attempt <= 12; attempt += 1) {

@@ -406,7 +406,7 @@ export class ComponentEngine {
       const selected = await this.selectRandomPowerSupply();
       await waitForBlockingOverlay(this.page);
       const invalidHeader = this.page.locator('[id*="section_header" i][id*="power" i]')
-        .filter({ has: this.page.locator('[title="Error" i]:visible, [aria-label="Error" i]:visible, .dqe-status-icon-14:visible') });
+        .filter({ has: this.page.locator('[title="Error" i]:visible, [aria-label="Error" i]:visible, .img-alert.dqe-status-icon-14:visible') });
       if (await invalidHeader.count()) {
         const rows = (await this.powerSupplyRows().allTextContents()).map((text) => text.replace(/\s+/g, ' ').trim());
         throw new Error(`Power Supplies still has a mandatory error after selecting ${selected.productNumber} x${selected.quantity}. `
