@@ -7,6 +7,14 @@ export class ConfigurationRuleError extends Error {
   constructor(message: string) { super(message); this.name = 'ConfigurationRuleError'; }
 }
 
+/**
+ * OCA did not load a page it should have (landing page stuck on "Loading...", or a Menu tab
+ * with no sections after a server error). Opening OCA again usually works, so it is retried.
+ */
+export class OcaPageLoadError extends Error {
+  constructor(message: string) { super(message); this.name = 'OcaPageLoadError'; }
+}
+
 export async function resolveConfigurationErrors(page: Page, components: Pick<ComponentEngine, 'satisfyRequiredSection' | 'satisfyVisibleRequiredControl'>): Promise<void> {
   const errorIcons = page.locator([
     '[title="Error" i]',

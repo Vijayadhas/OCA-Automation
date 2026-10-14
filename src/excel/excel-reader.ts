@@ -50,20 +50,20 @@ export class ExcelReader {
     const componentRows = XLSX.utils.sheet_to_json<Row>(componentsSheet, { defval: '' });
     const byJob = new Map<string, ComponentInstruction[]>();
     componentRows.forEach((row, index) => {
-      const jobId = text(row['Job ID']);
+      const jobId = text(cellByHeader(row, 'Job ID'));
       if (!jobId) return;
-      const rawType = text(row['Selection Type']).toLowerCase();
+      const rawType = text(cellByHeader(row, 'Selection Type')).toLowerCase();
       const selectionType: SelectionType = isSelectionType(rawType) ? rawType : (rawType as SelectionType);
-      const quantityText = text(row.Quantity);
-      const sequenceText = text(row.Sequence);
+      const quantityText = text(cellByHeader(row, 'Quantity'));
+      const sequenceText = text(cellByHeader(row, 'Sequence'));
       const instruction: ComponentInstruction = {
         jobId,
-        section: text(row.Section),
-        productNumber: text(row['Product Number']) || undefined,
-        description: text(row.Description) || undefined,
+        section: text(cellByHeader(row, 'Section')),
+        productNumber: text(cellByHeader(row, 'Product Number')) || undefined,
+        description: text(cellByHeader(row, 'Description')) || undefined,
         quantity: quantityText ? Number(quantityText) : undefined,
         selectionType,
-        configurationText: text(row['Configuration Text']) || undefined,
+        configurationText: text(cellByHeader(row, 'Configuration Text')) || undefined,
         sequence: sequenceText ? Number(sequenceText) : index + 1,
       };
       byJob.set(jobId, [...(byJob.get(jobId) ?? []), instruction]);
@@ -71,10 +71,10 @@ export class ExcelReader {
 
     const modelRows = XLSX.utils.sheet_to_json<Row>(modelsSheet, { defval: '' });
     const jobs = modelRows.map((row, index): OcaJob => {
-      const jobId = text(row['Job ID']);
+      const jobId = text(cellByHeader(row, 'Job ID'));
       return {
         jobId,
-        modelNumber: text(row['Model Number']),
+        modelNumber: text(cellByHeader(row, 'Model Number')),
         modelDescription: text(cellByHeader(row, 'Model Description', 'Configured Model Description')) || undefined,
         integrationRackPartNumber: text(cellByHeader(row, 'Integration Rack Part number', 'Integration Rack Part Number')) || undefined,
         server: text(cellByHeader(row, 'Server')) || undefined,
@@ -82,9 +82,9 @@ export class ExcelReader {
         isSolution: solutionFlag(row),
         isStorage: bool(cellByHeader(row, 'Storage'), false),
         quotationMode: 'aaS',
-        serviceType: text(row['Service Type']) || 'Default',
-        generateEndBom: bool(row['Generate End BOM'], true),
-        enabled: bool(row.Enabled, true),
+        serviceType: text(cellByHeader(row, 'Service Type')) || 'Default',
+        generateEndBom: bool(cellByHeader(row, 'Generate End BOM'), true),
+        enabled: bool(cellByHeader(row, 'Enabled'), true),
         source: {
           kind: 'detailed-excel',
           instructions: (byJob.get(jobId) ?? []).sort((a, b) => a.sequence - b.sequence),
@@ -100,9 +100,9 @@ export class ExcelReader {
     const rows = XLSX.utils.sheet_to_json<Row>(sheet, { defval: '' });
     return rows.map((row, index): OcaJob => {
       const inputRow = index + 2;
-      const jobId = text(row['Job ID']) || `ROW-${inputRow}`;
-      const modelNumber = text(row['Model Number']) || text(row.Model);
-      const quotation = text(row['Quotation Mode']) || 'aaS';
+      const jobId = text(cellByHeader(row, 'Job ID')) || `ROW-${inputRow}`;
+      const modelNumber = text(cellByHeader(row, 'Model Number')) || text(cellByHeader(row, 'Model'));
+      const quotation = text(cellByHeader(row, 'Quotation Mode')) || 'aaS';
       if (!/^aaS$/i.test(quotation)) {
         throw new Error(`Models row ${inputRow}: Quotation Mode must be aaS`);
       }
@@ -112,13 +112,13 @@ export class ExcelReader {
         modelDescription: text(cellByHeader(row, 'Model Description', 'Configured Model Description')) || undefined,
         integrationRackPartNumber: text(cellByHeader(row, 'Integration Rack Part number', 'Integration Rack Part Number')) || undefined,
         server: text(cellByHeader(row, 'Server')) || undefined,
-        solutionName: text(row['Solution Name']) || text(row['Product or Solution Description']) || undefined,
+        solutionName: text(cellByHeader(row, 'Solution Name', 'Product or Solution Description')) || undefined,
         isSolution: solutionFlag(row),
         isStorage: bool(cellByHeader(row, 'Storage'), false),
         quotationMode: 'aaS',
-        serviceType: text(row['Service Type']) || text(row.Service) || 'Random',
-        generateEndBom: bool(row['Generate End BOM'] ?? row['End BOM Required'], true),
-        enabled: bool(row.Enabled, true),
+        serviceType: text(cellByHeader(row, 'Service Type')) || text(cellByHeader(row, 'Service')) || 'Random',
+        generateEndBom: bool(cellByHeader(row, 'Generate End BOM', 'End BOM Required'), true),
+        enabled: bool(cellByHeader(row, 'Enabled'), true),
         source: { kind: 'detailed-excel', instructions: this.flatInstructions(row, jobId) },
         inputRow,
       };
@@ -133,7 +133,8 @@ export class ExcelReader {
       const normalized = product.toLowerCase();
       if (!product || normalized === 'random') {
         instructions.push({ jobId, section, selectionType: 'random', sequence });
-      } else if (normalized === 'default') {
+      } else if (normalized === 'default' || normalized === 'automatic') {
+        // "Automatic" (older workbooks, e.g. Smart Chassis Product) means OCA manages the choice: keep it.
         instructions.push({ jobId, section, selectionType: 'default', sequence });
       } else {
         const quantityText = text(quantityCell);
@@ -149,11 +150,11 @@ export class ExcelReader {
       sequence += 10;
     };
 
-    addProduct('Processor', row.Processor, row['Processor Qty']);
-    addProduct('Memory', row.Memory, row['Memory Qty']);
-    addProduct('Smart Chassis', row['Smart Chassis Product'], row['Smart Chassis Qty']);
+    addProduct('Processor', cellByHeader(row, 'Processor'), cellByHeader(row, 'Processor Qty'));
+    addProduct('Memory', cellByHeader(row, 'Memory'), cellByHeader(row, 'Memory Qty'));
+    addProduct('Smart Chassis', cellByHeader(row, 'Smart Chassis Product'), cellByHeader(row, 'Smart Chassis Qty'));
 
-    const chassisConfig = text(row['Chassis Config']);
+    const chassisConfig = text(cellByHeader(row, 'Chassis Config'));
     if (chassisConfig && !/^(random|default)$/i.test(chassisConfig)) {
       instructions.push({
         jobId,
@@ -165,7 +166,7 @@ export class ExcelReader {
       sequence += 10;
     }
 
-    addProduct('Power Supplies', row['Power Supply'], row['Power Qty']);
+    addProduct('Power Supplies', cellByHeader(row, 'Power Supply'), cellByHeader(row, 'Power Qty'));
     return instructions;
   }
 

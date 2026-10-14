@@ -1,5 +1,6 @@
 import { expect, type Page } from '@playwright/test';
 import { waitForBlockingOverlay } from '../core/waits';
+import { OcaPageLoadError } from './configuration-errors';
 
 export interface LandingModeState {
   aasSelected: boolean;
@@ -72,9 +73,19 @@ export async function selectAasMode(page: Page, options: AasSelectionOptions): P
   const headerAas = page.locator('#header_greenlake').first();
   const headerMenu = page.locator('#header_new_config_label').first();
 
-  await expect.poll(async () => await landingAas.isVisible().catch(() => false) || await search.isVisible().catch(() => false), {
-    timeout: Math.max(options.landingWaitMs, 60_000), message: 'Authenticated OCA landing page (aaS option or search box)',
-  }).toBe(true);
+  const landingWaitMs = Math.max(options.landingWaitMs, 60_000);
+  try {
+    await expect.poll(async () => await landingAas.isVisible().catch(() => false) || await search.isVisible().catch(() => false), {
+      timeout: landingWaitMs, message: 'Authenticated OCA landing page (aaS option or search box)',
+    }).toBe(true);
+  } catch (error) {
+    // S3V83A: OCA's own "Loading..." block (.blockUI.blockMsg .maui-loading-label) stayed over an
+    // empty page for the whole wait. That is OCA failing to load, not a sign-in prompt; reopening helps.
+    if (await page.locator('.blockUI.blockMsg .maui-loading-label').filter({ visible: true }).first().isVisible().catch(() => false)) {
+      throw new OcaPageLoadError(`OCA stayed on its "Loading..." screen for ${Math.round(landingWaitMs / 1000)} s; the landing page did not load`);
+    }
+    throw error;
+  }
   if (!await landingAas.isVisible().catch(() => false)) {
     // The search box can render before the mode toggle; give the toggle a moment.
     await landingAas.waitFor({ state: 'visible', timeout: options.aasAppearMs ?? 20_000 }).catch(() => undefined);

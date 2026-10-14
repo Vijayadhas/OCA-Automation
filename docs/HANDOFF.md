@@ -95,6 +95,9 @@ Main code: `src/automation/component-engine.ts` (`ComponentEngine`),
 | 18 | **P86628-B21 (DL110 Gen12):** "Minimum 2 and Maximum 2 of M.2 SSD Drive must be selected" not recognised; the M.2 drive stayed at quantity 1, so all 3 attempts failed | `quantityRule` also reads "Minimum N and Maximum M of ... must be selected" (commit `350e66c`) |
 | 19 | On retries the step label showed the previous attempt's random part ("Component 20: P69730-F21") | `processJob` works on per-attempt copies of the Excel instructions (commit `350e66c`) |
 | 20 | **DL320 Gen12** (P75220-B21 GPU and others): "Must select Min = 1 of Networking (PCIe or OCP)" / "Minimum 1 quantities of Graphics option ..." link six choices and name no products; the flagged SAS Controller already had a selection, so nothing was filled | Group-rule repair (`repairGroupRule`): the rule's own words pick the covered choices by title (PCIe/OCP → Ethernet PCIe, InfiniBand PCIe, OCP Ethernet; Graphics → Graphics) and one random product is added when none of them has a selection |
+| 21 | OCA server/load failures: landing stuck on OCA's "Loading..." (S3V83A); Menu tab empty behind "(OCA) has encountered a problem" / `Widget does not exist on current page: extended_overview:menu` (P72176-B21) — components skipped as "not offered", then the dialog blocked the BOM click | Menu must have section headers (`ensureMenuLoaded`); both cases raise `OcaPageLoadError`, retried from Open OCA; failures append OCA's dialog text |
+| 22 | Could not tell which code produced a pasted log | Each run logs `[INFO] Code version: commit <hash> <date>` (or newest source file time for zip downloads). Check it first on every log |
+| 23 | Excel check (offline, Python mirror of the reader): `Smart Chassis Product = Automatic` became a product named "Automatic" x0; most columns were matched only by exact header text, so `processor qty` or a trailing space silently made a component random | `Automatic` = keep OCA's selection; every column matched ignoring case and spaces (CLI and dashboard upload share `ExcelReader`) |
 
 ## 5. Current state (2026-10-14)
 
@@ -109,6 +112,7 @@ Main code: `src/automation/component-engine.ts` (`ComponentEngine`),
 
 ## 6. To do next
 
+0. Every log starts with `[INFO] Code version:`. Compare it with `git log -1` before diagnosing; ask for a re-run if it is older.
 1. On the run system: `git pull`, `npm run typecheck`, `npm run test:unit`. Fix anything that
    fails first.
 2. Re-run **P86628-B21**. Expect M.2 to go 1 → 2 (`OCA allows 2-2; changing quantity 1 to 2`), and

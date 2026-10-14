@@ -37,8 +37,9 @@ adding real job data if you want to preserve the example.
 `Smart Chassis Qty`, `Chassis Config`, `Power Supply`,
 `Power Qty`, `Service`, `Generate End BOM`, `Enabled`
 
-Use `Default` when OCA should retain its default selection. Use `Automatic` for an automatically
-managed Smart Chassis choice. Quotation Mode must be `aaS`. If Job ID is blank, the tool assigns
+Column names are matched ignoring case and spaces (`processor qty` reads as `Processor Qty`).
+Use `Default` when OCA should retain its default selection. `Automatic` (for an automatically
+managed Smart Chassis choice) behaves the same way. Quotation Mode must be `aaS`. If Job ID is blank, the tool assigns
 `ROW-<worksheet-row>`.
 
 Set `Storage` to `Yes` for a standalone storage model. The storage flow selects available Cloud

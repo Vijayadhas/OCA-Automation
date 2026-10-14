@@ -85,6 +85,8 @@ export class OcaEngine {
         new SolutionWizard(this.activePage).configure(instructions, job.server));
       result.selectedComponents = selections.map((item) => `${item.label}: ${item.text}`).join('; ');
     } else {
+      this.currentStep = 'Load Menu sections';
+      await this.measure('Load Menu sections', () => this.components.ensureMenuLoaded());
       this.currentStep = 'Show all component products';
       await this.measure('Show all component products', () => this.components.showAllProducts());
       for (const instruction of instructions) {

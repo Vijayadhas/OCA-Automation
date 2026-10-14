@@ -126,3 +126,37 @@ test('rejects a row that enables both Solution and Storage flows', () => {
   ], []);
   expect(() => new ExcelReader().read(file)).toThrow('Solution and Storage cannot both be Yes');
 });
+
+function modelsOnlyAt(models: Record<string, unknown>[]): string {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'oca-excel-'));
+  const file = path.join(directory, 'input.xlsx');
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(models), 'Models');
+  XLSX.writeFile(workbook, file);
+  return file;
+}
+
+test('reads Models columns whatever their case or spacing', () => {
+  const [job] = new ExcelReader().read(modelsOnlyAt([{
+    'job id': 'J-9', 'MODEL NUMBER': 'P72176-B21', 'Processor ': 'CPU-1', 'processor qty': 2, 'Memory Qty': 4, memory: 'MEM-1',
+    'Power  Supply': 'PSU-1', 'power qty': 2, service: 'Lite', 'generate end bom': 'No', enabled: 'No',
+  }]));
+  expect(job).toMatchObject({ jobId: 'J-9', modelNumber: 'P72176-B21', serviceType: 'Lite', generateEndBom: false, enabled: false });
+  expect(job.source.kind === 'detailed-excel' && job.source.instructions.map((item) => [item.section, item.productNumber, item.quantity, item.selectionType]))
+    .toEqual([
+      ['Processor', 'CPU-1', 2, 'quantity'],
+      ['Memory', 'MEM-1', 4, 'quantity'],
+      ['Smart Chassis', undefined, undefined, 'random'],
+      ['Power Supplies', 'PSU-1', 2, 'quantity'],
+    ]);
+});
+
+test('"Automatic" keeps OCA\'s selection instead of naming a product "Automatic"', () => {
+  // input/models.sample.xlsx still has Smart Chassis Product = Automatic, Smart Chassis Qty = 0.
+  const [job] = new ExcelReader().read(modelsOnlyAt([{
+    'Job ID': 'J-1', 'Model Number': 'P72176-B21', 'Smart Chassis Product': 'Automatic', 'Smart Chassis Qty': 0,
+  }]));
+  const chassis = job.source.kind === 'detailed-excel' ? job.source.instructions.find((item) => item.section === 'Smart Chassis') : undefined;
+  expect(chassis).toMatchObject({ selectionType: 'default' });
+  expect(chassis?.productNumber).toBeUndefined();
+});

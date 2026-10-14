@@ -6,13 +6,15 @@ import { ExcelWriter } from './excel/excel-writer';
 import { BrowserSession } from './automation/browser-session';
 import { OcaEngine } from './automation/oca-engine';
 import { UnsupportedComponentError } from './automation/component-engine';
-import { ConfigurationRuleError } from './automation/configuration-errors';
+import { ConfigurationRuleError, OcaPageLoadError } from './automation/configuration-errors';
 import { createPendingResult } from './models/automation-result';
 import { Logger } from './reporting/logger';
 import { ScreenshotManager } from './reporting/screenshot-manager';
 import { TraceManager } from './reporting/trace-manager';
 import { HtmlCapture } from './reporting/html-capture';
 import { getErrorMessage } from './core/excel';
+import { codeVersion } from './core/code-version';
+import { ocaProblemMessage } from './core/oca-problem';
 
 export async function run(argv = process.argv.slice(2)): Promise<number> {
   let options;
@@ -51,7 +53,8 @@ export async function run(argv = process.argv.slice(2)): Promise<number> {
   };
   process.on('SIGINT', onSigint); process.on('SIGTERM', onSigterm); process.on('message', onMessage);
   let failures = 0;
-  // Attempts per model when OCA rules stay unmet (OCA_RULE_CONFLICT_ATTEMPTS, default 3).
+  console.log(`[INFO] Code version: ${codeVersion()}`);
+  // Attempts per model when OCA rules stay unmet or OCA fails to load a page (OCA_RULE_CONFLICT_ATTEMPTS, default 3).
   const ruleConflictAttempts = Math.max(1, Number(process.env.OCA_RULE_CONFLICT_ATTEMPTS ?? 3));
 
   try {
@@ -85,12 +88,16 @@ export async function run(argv = process.argv.slice(2)): Promise<number> {
               return await engine.processJob(job, retryCount);
             } catch (error) {
               // Random picks can trigger an OCA rule recovery cannot meet; fresh picks usually avoid it.
-              if (!(error instanceof ConfigurationRuleError) || attempt >= ruleConflictAttempts || stopRequested) throw error;
+              // OCA sometimes fails to load a page (server error); opening it again usually works.
+              const loadFailure = error instanceof OcaPageLoadError;
+              if (!(error instanceof ConfigurationRuleError || loadFailure) || attempt >= ruleConflictAttempts || stopRequested) throw error;
               let attemptPage: typeof engine.activePage | undefined;
               try { attemptPage = engine.activePage; } catch { attemptPage = undefined; }
               await html.failure(attemptPage, `${engine.currentStep} attempt ${attempt}`);
-              console.log(`[RETRY] ${job.modelNumber}: OCA rules still unmet after attempt ${attempt}/${ruleConflictAttempts}; `
-                + `starting again with new random picks. ${getErrorMessage(error).split('. OCA messages:')[1]?.trim() ?? ''}`);
+              console.log(loadFailure
+                ? `[RETRY] ${job.modelNumber}: OCA did not load after attempt ${attempt}/${ruleConflictAttempts}; opening OCA again. ${getErrorMessage(error)}`
+                : `[RETRY] ${job.modelNumber}: OCA rules still unmet after attempt ${attempt}/${ruleConflictAttempts}; `
+                  + `starting again with new random picks. ${getErrorMessage(error).split('. OCA messages:')[1]?.trim() ?? ''}`);
               logger.info('Job retried after OCA rule conflict', { jobId: job.jobId, attempt, error: getErrorMessage(error) });
             }
           }
@@ -106,6 +113,9 @@ export async function run(argv = process.argv.slice(2)): Promise<number> {
         result.errorStep = engine.currentStep; result.errorMessage = getErrorMessage(error);
         let failedPage: typeof engine.activePage | undefined;
         try { failedPage = engine.activePage; } catch { failedPage = undefined; }
+        // OCA's own error dialog explains failures it causes (e.g. a click it intercepted).
+        const problem = failedPage ? await ocaProblemMessage(failedPage).catch(() => '') : '';
+        if (problem && !result.errorMessage.includes(problem)) result.errorMessage += ` | OCA error dialog: ${problem}`;
         await html.failure(failedPage, engine.currentStep);
         result.screenshotPath = failedPage ? await screenshots.capture(failedPage, job.jobId).catch(() => '') : '';
         result.tracePath = await traces.finish(job.jobId, true);

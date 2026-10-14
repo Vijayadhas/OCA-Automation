@@ -7,6 +7,8 @@ import { RadioHandler } from '../components/radio-handler';
 import { ConfigurationHandler } from '../components/configuration-handler';
 import { AutomaticDependencyHandler } from '../components/automatic-dependency-handler';
 import type { PageSnapshot } from '../reporting/html-capture';
+import { ocaProblemMessage } from '../core/oca-problem';
+import { OcaPageLoadError } from './configuration-errors';
 
 export class UnsupportedComponentError extends Error {
   constructor(message: string) { super(message); this.name = 'UnsupportedComponentError'; }
@@ -114,6 +116,20 @@ export class ComponentEngine {
     this.quantities = new QuantityHandler(page, snapshot);
     this.configurations = new ConfigurationHandler(page);
     this.dependencies = new AutomaticDependencyHandler(this.quantities);
+  }
+
+  /**
+   * Fails when OCA's Menu tab has no component sections: the configuration did not load. On
+   * P72176-B21 the Menu panel was empty behind OCA's error dialog ("Widget does not exist on current
+   * page: extended_overview:menu"), every component was then skipped as "not offered", and the run
+   * only failed later at the BOM tab. Every CTO server menu has section headers.
+   */
+  async ensureMenuLoaded(timeoutMs = 30_000): Promise<void> {
+    const loaded = await this.page.locator('[id^="section_header_"]').first()
+      .waitFor({ state: 'attached', timeout: timeoutMs }).then(() => true, () => false);
+    if (loaded) return;
+    const problem = await ocaProblemMessage(this.page);
+    throw new OcaPageLoadError(`OCA's Menu tab has no component sections; the configuration did not load${problem ? `. OCA error: ${problem}` : ''}`);
   }
 
   async showAllProducts(): Promise<void> {
