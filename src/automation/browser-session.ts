@@ -36,9 +36,12 @@ export class BrowserSession {
     });
     this.context.setDefaultTimeout(this.options.actionTimeoutMs);
     this.context.setDefaultNavigationTimeout(this.options.navigationTimeoutMs);
-    this.context.on('close', () => this.report(
-      `[${this.closing ? 'INFO' : 'ERROR'}] Browser context closed (${this.closing ? 'runner cleanup' : 'unexpected'})`,
-    ));
+    const context = this.context;
+    context.on('close', () => {
+      this.report(`[${this.closing ? 'INFO' : 'ERROR'}] Browser context closed (${this.closing ? 'runner cleanup' : 'unexpected'})`);
+      // A closed or crashed browser is launched again by the next start().
+      if (this.context === context) this.context = undefined;
+    });
     const observePage = (page: Page) => {
       page.on('crash', () => this.report('[ERROR] Browser page crashed'));
       page.on('close', () => this.report(`[INFO] Browser page closed (${this.closing ? 'runner cleanup' : 'outside runner cleanup'})`));

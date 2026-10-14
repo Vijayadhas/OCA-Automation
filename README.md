@@ -69,9 +69,13 @@ selection. A supplied product with a blank quantity defaults to quantity 1. Rand
 memory selections use quantity 1 or 2; other random selections use quantity 1. When OCA's quantity
 menu does not offer the random quantity, the smallest quantity it offers is used. Random processors
 skip CPUs above `OCA_MAX_RANDOM_CPU_WATTS` (default 270). A section the model does not offer, such as
-Smart Chassis on a DL580 Gen12, is skipped and logged. When OCA still reports rule errors that the
-automation cannot resolve (usually a rule triggered by a random combination), the model is started
-again from the search with fresh random picks, up to `OCA_RULE_CONFLICT_ATTEMPTS` attempts (default 3).
+Smart Chassis on a DL580 Gen12, is skipped and logged. When a product given in Excel cannot be
+selected, another product of the same section is chosen and the change is listed under `Changed:` in
+`Selected Components`; when no option can be set, the component is left to OCA's own checks. When a
+model still fails (an OCA rule a random combination triggers, OCA failing to load, a timeout, or the
+browser closing), it is started again from the search with fresh random picks, up to
+`OCA_MODEL_ATTEMPTS` attempts (default 3; `OCA_RULE_CONFLICT_ATTEMPTS` is still read). Only a model
+OCA does not offer in aaS is not retried. A failed model never stops the batch.
 Actual selections are written to `Selected Components` in the results workbook. Use the advanced
 `Components` sheet for additional or repeated component instructions.
 

@@ -98,6 +98,7 @@ Main code: `src/automation/component-engine.ts` (`ComponentEngine`),
 | 21 | OCA server/load failures: landing stuck on OCA's "Loading..." (S3V83A); Menu tab empty behind "(OCA) has encountered a problem" / `Widget does not exist on current page: extended_overview:menu` (P72176-B21) — components skipped as "not offered", then the dialog blocked the BOM click | Menu must have section headers (`ensureMenuLoaded`); both cases raise `OcaPageLoadError`, retried from Open OCA; failures append OCA's dialog text |
 | 22 | Could not tell which code produced a pasted log | Each run logs `[INFO] Code version: commit <hash> <date>` (or newest source file time for zip downloads). Check it first on every log |
 | 23 | Excel check (offline, Python mirror of the reader): `Smart Chassis Product = Automatic` became a product named "Automatic" x0; most columns were matched only by exact header text, so `processor qty` or a trailing space silently made a component random | `Automatic` = keep OCA's selection; every column matched ignoring case and spaces (CLI and dashboard upload share `ExcelReader`) |
+| 24 | Requirement from the project lead: a failed model or component must not end the run; try other options | Any model failure is retried from the start (`OCA_MODEL_ATTEMPTS`, default 3) except `ModelNotFoundError`; a closed/crashed browser is relaunched; an Excel product that fails is replaced by another option of its section (`Changed:` in Selected Components), else left to OCA; trace/HTML/result-writing failures never stop the batch |
 
 ## 5. Current state (2026-10-14)
 
@@ -143,4 +144,4 @@ npm run ui        # dashboard at http://localhost:4173
 ```
 
 Useful environment variables: `OCA_BASE_URL`, `OCA_AUTH_WAIT_MS`, `OCA_MAX_RANDOM_CPU_WATTS`
-(default 270), `OCA_RULE_CONFLICT_ATTEMPTS` (default 3), `OCA_UI_PORT`.
+(default 270), `OCA_MODEL_ATTEMPTS` (default 3; old name `OCA_RULE_CONFLICT_ATTEMPTS`), `OCA_UI_PORT`.

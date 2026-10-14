@@ -6,7 +6,10 @@ import { createPendingResult } from '../models/automation-result';
 import { waitForBlockingOverlay } from '../core/waits';
 import { safeClick } from '../core/interactions';
 import { ModelSearch } from './model-search';
-import { ComponentEngine } from './component-engine';
+import { ComponentEngine, type ExecutionOutcome } from './component-engine';
+import { isBrowserClosedError } from '../core/errors';
+import { getErrorMessage } from '../core/excel';
+import type { ComponentInstruction } from '../models/component-instruction';
 import { BillingTier } from './billing-tier';
 import { SaveFlow, SaveRecoveryRequiredError } from './save-flow';
 import { EndBom } from './end-bom';
@@ -39,7 +42,15 @@ export class OcaEngine {
   currentStep = 'Initialize';
   private authenticated = false;
 
-  constructor(private readonly context: BrowserContext, private readonly options: OcaEngineOptions) {}
+  constructor(private context: BrowserContext, private readonly options: OcaEngineOptions) {}
+
+  /** Continues in a relaunched browser after the previous one closed or crashed. */
+  useContext(context: BrowserContext): void {
+    if (context === this.context) return;
+    this.context = context;
+    this.page = undefined;
+    this.authenticated = false;
+  }
 
   get activePage(): Page {
     if (!this.page) throw new Error('OCA page is not initialized');
@@ -73,6 +84,8 @@ export class OcaEngine {
     // start again from the Excel rows, not from the previous attempt's picks.
     const instructions = job.source.instructions.map((instruction) => ({ ...instruction }));
     const executedInstructions = [] as typeof instructions;
+    // Components that could not be set as asked, reported with the results.
+    const substitutions: string[] = [];
     const useSolutionWizard = await this.shouldUseSolutionWizard(job);
     if (job.isStorage) {
       this.currentStep = 'Configure Storage model';
@@ -92,7 +105,14 @@ export class OcaEngine {
       for (const instruction of instructions) {
         this.currentStep = `Component ${instruction.sequence}: ${instruction.productNumber ?? instruction.section}`;
         console.log(`[STEP] ${this.currentStep}`);
-        const outcome = await this.measure(this.currentStep, () => this.components.executeGeneric(instruction));
+        let outcome: ExecutionOutcome;
+        try {
+          outcome = await this.measure(this.currentStep, () => this.components.executeGeneric(instruction));
+        } catch (error) {
+          if (isBrowserClosedError(error)) throw error;
+          if (!await this.recoverComponent(instruction, error, substitutions)) continue;
+          outcome = 'done';
+        }
         if (outcome === 'skipped') {
           const ignored = instruction.selectionType === 'random' || instruction.selectionType === 'default'
             ? '' : `; ${instruction.selectionType} ${instruction.productNumber ?? instruction.configurationText ?? ''} was not applied`;
@@ -103,6 +123,7 @@ export class OcaEngine {
       }
       result.selectedComponents = executedInstructions.map((item) =>
         `${item.productNumber ?? item.configurationText ?? item.section}${item.quantity == null ? '' : ` x${item.quantity}`}`).join('; ');
+      if (substitutions.length) result.selectedComponents += `; Changed: ${substitutions.join('; ')}`;
     }
 
     this.currentStep = 'Resolve required configuration errors';
@@ -178,6 +199,39 @@ export class OcaEngine {
   /** Mid-step diagnostic capture of the active page (no-op when HTML capture is off). */
   private async snapshot(label: string): Promise<void> {
     await this.options.html?.diagnostic(this.page, label);
+  }
+
+  /**
+   * A component that could not be set does not fail the model. A product given in Excel is
+   * replaced by another option of its section; otherwise the component is left to OCA, whose
+   * error checks (resolveConfigurationErrors) still fill or reject a required section.
+   * Returns true when another option was selected.
+   */
+  private async recoverComponent(instruction: ComponentInstruction, error: unknown, substitutions: string[]): Promise<boolean> {
+    const reason = getErrorMessage(error).split('\n')[0];
+    const asked = instruction.productNumber ?? instruction.configurationText ?? instruction.selectionType;
+    // Close a menu or dialog the failed attempt may have left open.
+    await this.activePage.keyboard.press('Escape').catch(() => undefined);
+    await waitForBlockingOverlay(this.activePage);
+    if (instruction.selectionType === 'quantity' || instruction.selectionType === 'radio') {
+      console.log(`[WARN] ${instruction.section} ${asked} could not be selected (${reason}); trying another ${instruction.section} option`);
+      try {
+        const selected = await this.components.selectRandom(instruction.section);
+        substitutions.push(`${instruction.section} ${selected.productNumber} x${selected.quantity} instead of ${asked}`);
+        instruction.productNumber = selected.productNumber;
+        instruction.quantity = selected.quantity;
+        instruction.description = selected.description || instruction.description;
+        return true;
+      } catch (fallbackError) {
+        if (isBrowserClosedError(fallbackError)) throw fallbackError;
+        await this.activePage.keyboard.press('Escape').catch(() => undefined);
+        await waitForBlockingOverlay(this.activePage);
+        console.log(`[WARN] No other ${instruction.section} option could be selected: ${getErrorMessage(fallbackError).split('\n')[0]}`);
+      }
+    }
+    console.log(`[WARN] Leaving ${instruction.section} (${asked}) to OCA: ${reason}`);
+    substitutions.push(`${instruction.section} not set (${asked}: ${reason})`);
+    return false;
   }
 
   private async measure<T>(label: string, action: () => Promise<T>): Promise<T> {

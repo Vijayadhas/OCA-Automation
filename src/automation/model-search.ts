@@ -1,4 +1,5 @@
 import { expect, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import { ModelNotFoundError } from '../core/errors';
 import { safeClick } from '../core/interactions';
 import { escapeRegex, waitForBlockingOverlay } from '../core/waits';
 
@@ -76,7 +77,7 @@ export class ModelSearch {
       return (outcome = /no search results/i.test(announced) ? 'none' : '');
     }, { timeout: 60_000, message: `Search dropdown option for ${modelNumber}` }).not.toBe('');
     if (outcome === 'none' && !await options.first().isVisible({ timeout: 3_000 }).catch(() => false)) {
-      throw new Error(`OCA returned no search results for ${modelNumber} in aaS mode. Check the model number, `
+      throw new ModelNotFoundError(`OCA returned no search results for ${modelNumber} in aaS mode. Check the model number, `
         + 'or search for it manually in OCA with aaS selected to confirm it is offered.');
     }
     const optionTexts = await options.evaluateAll((nodes) => nodes.map((node) => (node.textContent ?? '')

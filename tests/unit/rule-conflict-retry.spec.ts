@@ -6,6 +6,7 @@ import { run } from '../../src/main';
 import { BrowserSession } from '../../src/automation/browser-session';
 import { OcaEngine } from '../../src/automation/oca-engine';
 import { ConfigurationRuleError } from '../../src/automation/configuration-errors';
+import { ModelNotFoundError } from '../../src/core/errors';
 import { ExcelWriter } from '../../src/excel/excel-writer';
 import { createPendingResult } from '../../src/models/automation-result';
 
@@ -46,7 +47,7 @@ test('starts a model again with new picks when OCA rules stay unmet', async () =
   expect(new ExcelWriter(directory, input).getExisting('JOB-001')?.executionStatus).toBe('Success');
 });
 
-test('gives up after three attempts, and never retries other failures', async () => {
+test('gives up after three attempts, and never retries a model OCA does not offer', async () => {
   const conflict = workbook('retry-exhausted');
   let attempts = 0;
   await withMockedEngine(async () => {
@@ -57,13 +58,28 @@ test('gives up after three attempts, and never retries other failures', async ()
   });
   expect(attempts).toBe(3);
 
-  const other = workbook('no-retry');
+  const missing = workbook('no-retry');
   attempts = 0;
   await withMockedEngine(async () => {
     attempts += 1;
-    throw new Error('OCA returned no search results for P72176-B21 in aaS mode');
+    throw new ModelNotFoundError('OCA returned no search results for P72176-B21 in aaS mode');
   }, async () => {
-    expect(await run(['--input', other.input, '--output', other.directory])).toBe(1);
+    expect(await run(['--input', missing.input, '--output', missing.directory])).toBe(1);
   });
   expect(attempts).toBe(1);
+});
+
+test('starts a model again after any other failure, such as a timeout', async () => {
+  const { directory, input } = workbook('retry-any');
+  let attempts = 0;
+  await withMockedEngine(async (job, retryCount) => {
+    attempts += 1;
+    if (attempts === 1) throw new Error('locator.click: Timeout 30000ms exceeded.');
+    const result = createPendingResult(job.jobId, job.modelNumber, retryCount);
+    result.executionStatus = 'Success';
+    return result;
+  }, async () => {
+    expect(await run(['--input', input, '--output', directory])).toBe(0);
+  });
+  expect(attempts).toBe(2);
 });

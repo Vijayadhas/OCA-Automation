@@ -7,12 +7,13 @@ import { BrowserSession } from './automation/browser-session';
 import { OcaEngine } from './automation/oca-engine';
 import { UnsupportedComponentError } from './automation/component-engine';
 import { ConfigurationRuleError, OcaPageLoadError } from './automation/configuration-errors';
-import { createPendingResult } from './models/automation-result';
+import { createPendingResult, type AutomationResult } from './models/automation-result';
 import { Logger } from './reporting/logger';
 import { ScreenshotManager } from './reporting/screenshot-manager';
 import { TraceManager } from './reporting/trace-manager';
 import { HtmlCapture } from './reporting/html-capture';
 import { getErrorMessage } from './core/excel';
+import { isBrowserClosedError, ModelNotFoundError } from './core/errors';
 import { codeVersion } from './core/code-version';
 import { ocaProblemMessage } from './core/oca-problem';
 
@@ -53,9 +54,23 @@ export async function run(argv = process.argv.slice(2)): Promise<number> {
   };
   process.on('SIGINT', onSigint); process.on('SIGTERM', onSigterm); process.on('message', onMessage);
   let failures = 0;
+  // A result that cannot be written (e.g. the results workbook is open in Excel) must not stop the batch.
+  const saveResult = async (result: AutomationResult): Promise<void> => {
+    for (let tries = 1; ; tries += 1) {
+      try { await writer.writeResult(result); return; } catch (error) {
+        if (tries >= 3) {
+          console.log(`[ERROR] Could not write the result of ${result.jobId} to ${writer.outputPath}: ${getErrorMessage(error)}; continuing with the next model`);
+          logger.error('Result not written', { jobId: result.jobId, error: getErrorMessage(error) });
+          return;
+        }
+        console.log(`[WARN] Writing results failed (${getErrorMessage(error).split('\n')[0]}); close the results workbook if it is open in Excel. Trying again in 10 s`);
+        await new Promise((resolve) => setTimeout(resolve, 10_000));
+      }
+    }
+  };
   console.log(`[INFO] Code version: ${codeVersion()}`);
-  // Attempts per model when OCA rules stay unmet or OCA fails to load a page (OCA_RULE_CONFLICT_ATTEMPTS, default 3).
-  const ruleConflictAttempts = Math.max(1, Number(process.env.OCA_RULE_CONFLICT_ATTEMPTS ?? 3));
+  // Attempts per model before it is reported as failed (OCA_MODEL_ATTEMPTS, formerly OCA_RULE_CONFLICT_ATTEMPTS; default 3).
+  const modelAttempts = Math.max(1, Number(process.env.OCA_MODEL_ATTEMPTS ?? process.env.OCA_RULE_CONFLICT_ATTEMPTS ?? 3) || 3);
 
   try {
     const context = await session.start();
@@ -72,7 +87,7 @@ export async function run(argv = process.argv.slice(2)): Promise<number> {
       if (!job.enabled) {
         const skipped = createPendingResult(job.jobId, job.modelNumber); skipped.executionStatus = 'Skipped';
         skipped.errorMessage = 'Job is disabled'; skipped.endTime = new Date().toISOString();
-        await writer.writeResult(skipped);
+        await saveResult(skipped);
         console.log(`[${index + 1}/${jobs.length}] ${job.modelNumber} - Skipped - Job is disabled`);
         continue;
       }
@@ -80,30 +95,35 @@ export async function run(argv = process.argv.slice(2)): Promise<number> {
       console.log(`[${index + 1}/${jobs.length}] ${job.modelNumber} - Running`);
       logger.info('Job started', { jobId: job.jobId, modelNumber: job.modelNumber, retryCount });
       html.startJob(job.jobId);
-      await traces.start(job.jobId);
+      await traces.start(job.jobId).catch(() => undefined);
       try {
         const result = await (async () => {
           for (let attempt = 1; ; attempt += 1) {
             try {
+              // Launches the browser again when it was closed or crashed during an earlier attempt or job.
+              engine.useContext(await session.start());
               return await engine.processJob(job, retryCount);
             } catch (error) {
-              // Random picks can trigger an OCA rule recovery cannot meet; fresh picks usually avoid it.
-              // OCA sometimes fails to load a page (server error); opening it again usually works.
-              const loadFailure = error instanceof OcaPageLoadError;
-              if (!(error instanceof ConfigurationRuleError || loadFailure) || attempt >= ruleConflictAttempts || stopRequested) throw error;
+              // Any failure starts the model again with fresh random picks, except a model OCA does
+              // not offer (a retry cannot help) or a requested stop.
+              if (error instanceof ModelNotFoundError || attempt >= modelAttempts || stopRequested) throw error;
               let attemptPage: typeof engine.activePage | undefined;
               try { attemptPage = engine.activePage; } catch { attemptPage = undefined; }
-              await html.failure(attemptPage, `${engine.currentStep} attempt ${attempt}`);
-              console.log(loadFailure
-                ? `[RETRY] ${job.modelNumber}: OCA did not load after attempt ${attempt}/${ruleConflictAttempts}; opening OCA again. ${getErrorMessage(error)}`
-                : `[RETRY] ${job.modelNumber}: OCA rules still unmet after attempt ${attempt}/${ruleConflictAttempts}; `
-                  + `starting again with new random picks. ${getErrorMessage(error).split('. OCA messages:')[1]?.trim() ?? ''}`);
-              logger.info('Job retried after OCA rule conflict', { jobId: job.jobId, attempt, error: getErrorMessage(error) });
+              await html.failure(attemptPage, `${engine.currentStep} attempt ${attempt}`).catch(() => '');
+              const message = getErrorMessage(error);
+              const next = isBrowserClosedError(error) ? 'restarting the browser and the model'
+                : error instanceof OcaPageLoadError ? 'opening OCA again'
+                  : error instanceof ConfigurationRuleError ? 'starting again with new random picks'
+                    : 'starting the model again';
+              const detail = error instanceof ConfigurationRuleError
+                ? message.split('. OCA messages:')[1]?.trim() ?? message : message.split('\n')[0];
+              console.log(`[RETRY] ${job.modelNumber}: attempt ${attempt}/${modelAttempts} failed at "${engine.currentStep}"; ${next}. ${detail}`);
+              logger.info('Job retried', { jobId: job.jobId, attempt, step: engine.currentStep, error: message });
             }
           }
         })();
-        result.tracePath = await traces.finish(job.jobId, false);
-        await writer.writeResult(result);
+        result.tracePath = await traces.finish(job.jobId, false).catch(() => '');
+        await saveResult(result);
         console.log(`[${index + 1}/${jobs.length}] ${job.modelNumber} - Success${result.ucid ? ` - ${result.ucid}` : ''}`);
         logger.info('Job succeeded', { jobId: job.jobId, ucid: result.ucid });
       } catch (error) {
@@ -116,11 +136,11 @@ export async function run(argv = process.argv.slice(2)): Promise<number> {
         // OCA's own error dialog explains failures it causes (e.g. a click it intercepted).
         const problem = failedPage ? await ocaProblemMessage(failedPage).catch(() => '') : '';
         if (problem && !result.errorMessage.includes(problem)) result.errorMessage += ` | OCA error dialog: ${problem}`;
-        await html.failure(failedPage, engine.currentStep);
+        await html.failure(failedPage, engine.currentStep).catch(() => '');
         result.screenshotPath = failedPage ? await screenshots.capture(failedPage, job.jobId).catch(() => '') : '';
-        result.tracePath = await traces.finish(job.jobId, true);
+        result.tracePath = await traces.finish(job.jobId, true).catch(() => '');
         result.endTime = new Date().toISOString(); result.duration = Date.parse(result.endTime) - Date.parse(result.startTime);
-        await writer.writeResult(result);
+        await saveResult(result);
         console.log(`[${index + 1}/${jobs.length}] ${job.modelNumber} - ${result.executionStatus} - ${result.errorMessage}`);
         logger.error('Job failed', { jobId: job.jobId, step: result.errorStep, error: result.errorMessage });
       }
