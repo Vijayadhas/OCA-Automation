@@ -160,6 +160,15 @@ export class ModelSearch {
     const configurableCard = cards.filter({ has: action }).first();
     if (await configurableCard.isVisible().catch(() => false)) return configurableCard;
 
+    // A Wizard card names its product by an internal id ("arcusDhciSol" — Wizard); the model number
+    // is only in its product dropdown: <option value="arcusDhciSol" data-displayid="S3V83A">.
+    const byDisplayId = container.locator('.dqe-card').filter({ visible: true, has: action })
+      .filter({ has: page.locator(`select.dqe-products option[data-displayid=${JSON.stringify(modelNumber)} i]`) }).first();
+    if (await byDisplayId.isVisible().catch(() => false)) {
+      console.log(`[INFO] ${modelNumber} card found by its product dropdown: ${(await byDisplayId.locator('.category').first().innerText().catch(() => '')).replace(/\s+/g, ' ').trim()}`);
+      return byDisplayId;
+    }
+
     // Older DQE markup has no dqe-card class. Select the nearest visible action
     // container carrying the exact model number rather than a broad ancestor.
     const legacy = container.locator('div').filter({ visible: true, hasText: modelPattern, has: action }).last();
@@ -167,7 +176,9 @@ export class ModelSearch {
 
     // Once an exact autocomplete entry has been selected, some solution cards omit
     // the model number from their rendered body. Accept a single unambiguous card.
-    const configurableCards = container.locator('.dqe-card').filter({ visible: true, has: action });
+    // Solution Template cards (data-type="st", e.g. "PC3000 - Promo") are pre-built configurations,
+    // not the model to build from scratch, so they do not count.
+    const configurableCards = container.locator('.dqe-card:not([data-type="st"])').filter({ visible: true, has: action });
     if (await configurableCards.count() === 1) return configurableCards.first();
     return legacy;
   }
