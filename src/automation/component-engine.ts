@@ -32,6 +32,19 @@ export function modelWords(text: string): string[] {
     .filter(isModelWord))];
 }
 
+/** Words too general to tie an OCA rule to a choice title. */
+const GENERIC_WORDS = new Set(['and', 'or', 'of', 'the', 'for', 'with', 'per', 'must', 'be', 'selected', 'select',
+  'option', 'options', 'min', 'max', 'qty', 'kit', 'server', 'cto']);
+
+/**
+ * Distinctive words of a choice title or rule text, e.g. "Ethernet PCIe" → ethernet, pcie. Used to
+ * find the choices a rule means when it names a group ("Networking (PCIe or OCP)"), not products.
+ */
+export function titleWords(text: string): string[] {
+  return [...new Set(text.toLowerCase().split(/[^a-z0-9]+/)
+    .filter((word) => word.length > 1 && !/^\d+$/.test(word) && !GENERIC_WORDS.has(word)))];
+}
+
 /** True when text names a part number as a whole word ("(P80429-B21)"), not inside a longer name ("NS204i-u"). */
 export function mentionsProduct(text: string, productNumber: string): boolean {
   return new RegExp(`(^|[^A-Za-z0-9])${escapeRegex(productNumber)}(?![A-Za-z0-9-])`, 'i').test(text);
@@ -57,6 +70,12 @@ export type ExecutionOutcome = 'done' | 'skipped';
 interface RowInfo {
   id: string; productNumber: string; description: string; unavailable: boolean;
   hasRadio: boolean; radioChecked: boolean; hasQuantity: boolean; quantity: string; visible: boolean;
+}
+
+/** A row recovery may pick: a visible, available product with a quantity or radio control. */
+function isPickable(row: RowInfo): boolean {
+  return Boolean(row.id && row.productNumber && row.visible && !row.unavailable
+    && !isMemoryBlankProduct(row.description) && (row.hasQuantity || row.hasRadio));
 }
 
 interface RandomPolicy { quantities: number[]; radioOnly: boolean; limitWatts: boolean }
@@ -336,12 +355,18 @@ export class ComponentEngine {
    * OCA's error-level rules shown on a choice: each li.message_li's text and the choice ids
    * its a.err-lnk links name (the choices the rule covers).
    */
-  async choiceRules(choiceId: string): Promise<Array<{ text: string; targets: string[] }>> {
+  async choiceRules(choiceId: string): Promise<Array<{ text: string; ownText: string; targets: string[] }>> {
     return this.page.locator(`[id=${JSON.stringify(`choice_header_${choiceId}`)}] li.message_li .error_message`)
-      .evaluateAll((spans) => spans.map((span) => ({
-        text: (span.textContent ?? '').replace(/\s+/g, ' ').trim(),
-        targets: Array.from(span.querySelectorAll('a.err-lnk')).map((link) => link.id),
-      })));
+      .evaluateAll((spans) => spans.map((span) => {
+        // ownText leaves out the linked choice titles, which every rule lists after its own words.
+        const own = span.cloneNode(true) as HTMLElement;
+        own.querySelectorAll('a.err-lnk').forEach((link) => link.remove());
+        return {
+          text: (span.textContent ?? '').replace(/\s+/g, ' ').trim(),
+          ownText: (own.textContent ?? '').replace(/\(\s*(?:,\s*)*\)/g, '').replace(/\s+/g, ' ').trim(),
+          targets: Array.from(span.querySelectorAll('a.err-lnk')).map((link) => link.id),
+        };
+      }));
   }
 
   /** Choices of a section whose status icon OCA shows as an error (img-alert). */
@@ -374,19 +399,12 @@ export class ComponentEngine {
       return quantity !== existing.quantity;
     }
     const rules = await this.choiceRules(choice.id);
-    // Open every section involved first: only rows the page shows can be picked. Rows behind
-    // OCA's "Show more" stay hidden, and choosing one timed out (P83540-B21 cables).
-    for (const choiceId of new Set([choice.id, ...rules.flatMap((rule) => rule.targets)])) {
-      const owner = await this.owningSection(choiceId);
-      if (owner) await this.open(owner);
-    }
-    const pickable = (row: RowInfo) => Boolean(row.id && row.productNumber && row.visible && !row.unavailable
-      && !isMemoryBlankProduct(row.description) && (row.hasQuantity || row.hasRadio));
+    await this.openOwners([choice.id, ...rules.flatMap((rule) => rule.targets)]);
     const candidates = new Map<string, RowInfo & { choiceId: string }>();
     for (const rule of rules) {
       for (const target of new Set([choice.id, ...rule.targets])) {
         for (const row of await this.rowInfo(this.choiceRows(target))) {
-          if (pickable(row) && mentionsProduct(rule.text, row.productNumber)) candidates.set(row.id, { ...row, choiceId: target });
+          if (isPickable(row) && mentionsProduct(rule.text, row.productNumber)) candidates.set(row.id, { ...row, choiceId: target });
         }
       }
     }
@@ -395,7 +413,7 @@ export class ComponentEngine {
       // OCA often names products by model words instead ("1-port/2-port PCIe/OROC TM controller
       // (MR416i / MR216i / MR408i)"); keep this choice's products whose descriptions share the most.
       const ruleWords = new Set(rules.flatMap((rule) => modelWords(rule.text)));
-      const rows = (await this.rowInfo(this.choiceRows(choice.id))).filter(pickable)
+      const rows = (await this.rowInfo(this.choiceRows(choice.id))).filter(isPickable)
         .map((row) => ({ row, score: modelWords(row.description).filter((word) => ruleWords.has(word)).length }));
       const best = Math.max(0, ...rows.map((item) => item.score));
       if (best > 0) {
@@ -404,19 +422,71 @@ export class ComponentEngine {
       }
     }
     if (!candidates.size && allowUnnamed) {
-      for (const row of await this.rowInfo(this.choiceRows(choice.id))) if (pickable(row)) candidates.set(row.id, { ...row, choiceId: choice.id });
+      for (const row of await this.rowInfo(this.choiceRows(choice.id))) if (isPickable(row)) candidates.set(row.id, { ...row, choiceId: choice.id });
       source = 'its available products';
     }
     if (!candidates.size) return false;
     console.log(`[STEP] Filling flagged choice "${choice.title || choice.id}" from ${source}: `
       + [...candidates.values()].map((row) => row.productNumber).join(', '));
-    await this.tryRandomCandidates(choice.title || choice.id, [...candidates.values()].map((row) => ({
+    await this.fillOne(choice.title || choice.id, [...candidates.values()]);
+    return true;
+  }
+
+  /**
+   * Fills a rule that counts selections across several choices without naming products, e.g. on
+   * P75220-B21 (DL320 Gen12 GPU): "Must select Min = 1 of Networking (PCIe or OCP)" and "Minimum 1
+   * quantities of Graphics option must be selected per GPU CTO Server", each linking Fibre Channel
+   * HBA, SAS Controller, InfiniBand PCIe, Ethernet PCIe, Graphics, and OCP Ethernet. The flagged
+   * choice (SAS Controller) already had a selection, so nothing else repaired it. The rule's own
+   * words pick the covered choices by title (PCIe, OCP → Ethernet PCIe, InfiniBand PCIe, OCP
+   * Ethernet; Graphics → Graphics), and one product is added to one of them that has none yet.
+   */
+  private async repairGroupRule(choice: MenuChoice): Promise<boolean> {
+    for (const rule of await this.choiceRules(choice.id)) {
+      if (rule.targets.length < 2) continue;
+      const ruleWords = new Set(titleWords(rule.ownText));
+      const titles = await this.page.evaluate((ids) => ids.map((id) =>
+        (document.getElementById(`choice_title_${id}`)?.textContent ?? '').replace(/\s+/g, ' ').trim()), rule.targets);
+      const scored = rule.targets.map((id, index) => ({
+        id, title: titles[index], score: titleWords(titles[index]).filter((word) => ruleWords.has(word)).length,
+      }));
+      const best = Math.max(0, ...scored.map((item) => item.score));
+      if (best === 0) continue;
+      const named = scored.filter((item) => item.score === best);
+      await this.openOwners(named.map((item) => item.id));
+      const candidates: Array<RowInfo & { choiceId: string }> = [];
+      const filled: string[] = [];
+      for (const target of named) {
+        if (await this.existingSelection(target.id)) { filled.push(target.title); continue; }
+        for (const row of await this.rowInfo(this.choiceRows(target.id))) if (isPickable(row)) candidates.push({ ...row, choiceId: target.id });
+      }
+      // A named choice that already has a product means the rule wants something else; leave it to OCA's message.
+      if (filled.length || !candidates.length) continue;
+      console.log(`[STEP] OCA rule "${rule.ownText}" covers ${named.map((item) => item.title).join(', ')}; filling one of them: `
+        + candidates.map((row) => row.productNumber).join(', '));
+      await this.fillOne(named.map((item) => item.title).join(' / '), candidates);
+      return true;
+    }
+    return false;
+  }
+
+  /** Opens the sections owning these choices: only rows the page shows can be picked. */
+  private async openOwners(choiceIds: string[]): Promise<void> {
+    // Rows behind OCA's "Show more" stay hidden, and choosing one timed out (P83540-B21 cables).
+    for (const choiceId of new Set(choiceIds)) {
+      const owner = await this.owningSection(choiceId);
+      if (owner) await this.open(owner);
+    }
+  }
+
+  /** Sets one random candidate to quantity 1 (or what OCA offers), then into its choice's quantity rule. */
+  private async fillOne(label: string, candidates: Array<RowInfo & { choiceId: string }>): Promise<void> {
+    await this.tryRandomCandidates(label, candidates.map((row) => ({
       row: this.page.locator(`[id=${JSON.stringify(row.id)}]`), productNumber: row.productNumber, choiceId: row.choiceId,
     })), async (candidate) => {
       const set = await this.quantities.set(candidate.row, candidate.productNumber, 1, false, { acceptOffered: true });
       return this.enforceQuantityRule(candidate.choiceId, candidate.row, candidate.productNumber, set);
     });
-    return true;
   }
 
   /** Brings a committed quantity into OCA's rule for the choice; returns the quantity now committed. */
@@ -559,8 +629,13 @@ export class ComponentEngine {
     const section = await this.openSection(sectionName);
     // Only this section's flagged choices are touched. In component sections the main choice is
     // already set, so other flagged choices are filled only with products OCA names.
-    for (const choice of await this.flaggedChoices(section)) {
+    const flagged = await this.flaggedChoices(section);
+    for (const choice of flagged) {
       if (await this.repairFlaggedChoice(choice, !randomized)) return;
+    }
+    // A rule counting across several choices may sit on a choice that is already filled.
+    for (const choice of flagged) {
+      if (await this.repairGroupRule(choice)) return;
     }
     if (randomized || await this.satisfyVisibleRequiredControl()) return;
     console.log(`[WARN] ${sectionName} is flagged, but none of its flagged choices can be filled; OCA's message will be reported`);

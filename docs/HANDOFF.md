@@ -94,6 +94,7 @@ Main code: `src/automation/component-engine.ts` (`ComponentEngine`),
 | 17 | A random combination triggered a rule recovery can't meet (Smart Chassis with NS204i-u needs a Performance heatsink) | User decision: retry the model from the search with fresh random picks, up to `OCA_RULE_CONFLICT_ATTEMPTS` (default 3). Only `ConfigurationRuleError` is retried |
 | 18 | **P86628-B21 (DL110 Gen12):** "Minimum 2 and Maximum 2 of M.2 SSD Drive must be selected" not recognised; the M.2 drive stayed at quantity 1, so all 3 attempts failed | `quantityRule` also reads "Minimum N and Maximum M of ... must be selected" (commit `350e66c`) |
 | 19 | On retries the step label showed the previous attempt's random part ("Component 20: P69730-F21") | `processJob` works on per-attempt copies of the Excel instructions (commit `350e66c`) |
+| 20 | **DL320 Gen12** (P75220-B21 GPU and others): "Must select Min = 1 of Networking (PCIe or OCP)" / "Minimum 1 quantities of Graphics option ..." link six choices and name no products; the flagged SAS Controller already had a selection, so nothing was filled | Group-rule repair (`repairGroupRule`): the rule's own words pick the covered choices by title (PCIe/OCP → Ethernet PCIe, InfiniBand PCIe, OCP Ethernet; Graphics → Graphics) and one random product is added when none of them has a selection |
 
 ## 5. Current state (2026-10-14)
 
@@ -115,16 +116,18 @@ Main code: `src/automation/component-engine.ts` (`ComponentEngine`),
    the 1000W DC PSU (P79329-B21): "DC Power Lug Kit OR DC Power Cord must be selected" and
    "Qty of Power Cords selected must match Qty of Power Supply selected". These may need repair
    support if they come back.
-3. Re-run **P72176-B21** (Smart Chassis / heatsink conflict, now covered by the retry) and
+3. Re-run the **DL320 Gen12** models (incl. P75220-B21 GPU) for the group-rule repair (#20).
+   Note: the DL320 run of 2026-10-14 used an older build.
+4. Re-run **P72176-B21** (Smart Chassis / heatsink conflict, now covered by the retry) and
    **P83540-B21**. Confirm End BOM capacity values are correct.
-4. Look into what is still slow or noisy in the logs:
+5. Look into what is still slow or noisy in the logs:
    - The first aaS click on the landing page often doesn't take; selecting aaS took 1m 13s.
    - "Blocking overlay did not become hidden within 60 seconds" is logged after turning off HPE
      Recommended on every attempt.
    - The memory menu sometimes fails to open on the first DIMM (the next candidate recovers).
-5. Make the **Solution Wizard** and **Storage** flows generic; they still use fixed choice ids.
+6. Make the **Solution Wizard** and **Storage** flows generic; they still use fixed choice ids.
    This needs captures from at least two models of each.
-6. Update the "Run result" column in the change log as runs are confirmed.
+7. Update the "Run result" column in the change log as runs are confirmed.
 
 ## 7. Commands (run system)
 
