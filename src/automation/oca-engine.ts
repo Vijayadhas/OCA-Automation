@@ -69,7 +69,9 @@ export class OcaEngine {
     console.log('[STEP] Verifying aaS quotation mode');
     result.quotationMode = await this.measure('Verify quotation mode', () => this.verifyQuotationMode());
     if (job.source.kind !== 'detailed-excel') throw new Error(`Unsupported configuration source: ${job.source.referenceType}`);
-    const instructions = job.source.instructions;
+    // Copies: random picks are written onto each instruction, and a rule-conflict retry must
+    // start again from the Excel rows, not from the previous attempt's picks.
+    const instructions = job.source.instructions.map((instruction) => ({ ...instruction }));
     const executedInstructions = [] as typeof instructions;
     const useSolutionWizard = await this.shouldUseSolutionWizard(job);
     if (job.isStorage) {

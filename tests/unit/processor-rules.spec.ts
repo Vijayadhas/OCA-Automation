@@ -111,3 +111,12 @@ test('reads "quantity must be Qty N" as an exact quantity', async ({ page }) => 
       8EDSFF drive cage is selected, then the drive cage quantity must be Qty 2. (<a class="err-lnk" id="cpuX_cpus">Drive Cage</a>)</span></li></ul></div>`));
   expect(await new ComponentEngine(page).quantityRule('cpuX_cpus')).toEqual({ min: 2, max: 2, even: false });
 });
+
+test('reads "Minimum N and Maximum M of ... must be selected" as a quantity range', async ({ page }) => {
+  // P86628-B21 (DL110 Gen12): "Minimum 2 and Maximum 2 of M.2 SSD Drive must be selected. (M.2 SSD Drive)"
+  await page.setContent(processorSection([{ pid: 'CPU', radio: false, select: [0, 1, 2] }]));
+  await page.locator('#choice_header_cpuX_cpus td').evaluate((cell) => cell.insertAdjacentHTML('beforeend',
+    `<div class="choice_messages error_bgd"><ul><li class="message_li"><span class="error_message">Minimum 2 and Maximum 2 of
+      M.2 SSD Drive must be selected. (<a class="err-lnk" id="cpuX_cpus">M.2 SSD Drive</a>)</span></li></ul></div>`));
+  expect(await new ComponentEngine(page).quantityRule('cpuX_cpus')).toEqual({ min: 2, max: 2, even: false });
+});

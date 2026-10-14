@@ -320,9 +320,12 @@ export class ComponentEngine {
       const even = /odd quantit(?:y|ies)\b[^.]*\bnot allowed/i.test(text);
       // "... then the drive cage quantity must be Qty 2" (P83540-B21, 8EDSFF in 2P).
       const exact = text.match(/quantity must be\s*(?:qty\s*)?(\d+)/i);
-      if (!range && !even && !exact) continue;
+      // "Minimum 2 and Maximum 2 of M.2 SSD Drive must be selected." (P86628-B21, DL110 Gen12).
+      const bounds = text.match(/Minimum\s*(\d+)\s*and\s*Maximum\s*(\d+)\s*of\b[^.]*\bmust be selected/i);
+      if (!range && !even && !exact && !bounds) continue;
       rule ??= { min: 0, max: Number.POSITIVE_INFINITY, even: false };
       if (range) { rule.min = Math.max(rule.min, Number(range[1])); rule.max = Math.min(rule.max, Number(range[2])); }
+      if (bounds) { rule.min = Math.max(rule.min, Number(bounds[1])); rule.max = Math.min(rule.max, Number(bounds[2])); }
       if (exact) { rule.min = Math.max(rule.min, Number(exact[1])); rule.max = Math.min(rule.max, Number(exact[1])); }
       rule.even ||= even;
     }
