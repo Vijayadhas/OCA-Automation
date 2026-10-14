@@ -1,4 +1,4 @@
-import type { OcaJob } from '../models/job';
+import { MODEL_TYPES, type OcaJob } from '../models/job';
 import { isSelectionType, type ComponentInstruction } from '../models/component-instruction';
 
 export class InputValidationError extends Error {
@@ -17,6 +17,9 @@ export class ExcelValidator {
       if (!job.modelNumber) issues.push(`Models row ${job.inputRow}: Model Number is required`);
       if (job.quotationMode !== 'aaS') issues.push(`Models row ${job.inputRow}: Quotation Mode must be aaS`);
       if (job.isSolution && job.isStorage) issues.push(`Models row ${job.inputRow}: Solution and Storage cannot both be Yes`);
+      if (job.modelType && !(MODEL_TYPES as readonly string[]).includes(job.modelType)) {
+        issues.push(`Models row ${job.inputRow}: Model Type '${job.modelType}' is not one of ${MODEL_TYPES.join(', ')} (leave it blank to detect it)`);
+      }
       // Job IDs name result rows and capture folders, so "JOB-001" and "job-001 " are the same ID.
       const id = (job.jobId ?? '').trim().toLowerCase();
       if (id && ids.has(id)) issues.push(`Models row ${job.inputRow}: duplicate Job ID ${job.jobId}; every Job ID must be unique`);

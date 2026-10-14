@@ -13,6 +13,10 @@ const RESULT_HEADERS = [
   'Retry Count', 'Error Step', 'Error Message', 'Screenshot Path', 'Trace Path',
 ] as const;
 
+const BOM_UCID_HEADERS = [
+  'Job ID', 'Model Number', 'Start BOM UCID', 'End BOM UCID', 'End BOM Associated', 'Execution Status', 'Comments',
+] as const;
+
 export class ExcelWriter {
   private readonly results = new Map<string, AutomationResult>();
   readonly outputPath: string;
@@ -100,6 +104,15 @@ export class ExcelWriter {
     const resultsSheet = XLSX.utils.json_to_sheet(resultRows, { header: [...RESULT_HEADERS] });
     XLSX.utils.book_append_sheet(workbook, resultsSheet, 'Results');
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(summary), 'Summary');
+    // The UCIDs the team records in its tracker, one row per model, at the end of the workbook.
+    const bomRows = values.map((result) => ({
+      'Job ID': result.jobId, 'Model Number': result.modelNumber,
+      'Start BOM UCID': result.startBomId, 'End BOM UCID': result.endBomId,
+      'End BOM Associated': result.endBomAssociated, 'Execution Status': result.executionStatus,
+      Comments: result.errorMessage ? `${result.errorStep ? `${result.errorStep}: ` : ''}${result.errorMessage}`.slice(0, 500)
+        : result.endBomStatus,
+    }));
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(bomRows, { header: [...BOM_UCID_HEADERS] }), 'BOM UCIDs');
     XLSX.writeFile(workbook, this.outputPath);
   }
 }

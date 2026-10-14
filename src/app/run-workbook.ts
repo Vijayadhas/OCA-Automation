@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import { defaultComponentInstructions } from '../excel/excel-reader';
-import type { ConfigurationSource, OcaJob } from '../models/job';
+import { parseModelType, routeFromModelType, type ConfigurationSource, type OcaJob } from '../models/job';
 
 /**
  * Normalizes jobs posted by the dashboard. A job without component instructions
@@ -12,8 +12,8 @@ export function prepareRunJobs(jobs: OcaJob[]): OcaJob[] {
     const source: ConfigurationSource = job.source ?? { kind: 'detailed-excel', instructions: [] };
     return {
       ...job,
-      isSolution: Boolean(job.isSolution),
-      isStorage: Boolean(job.isStorage),
+      // The dashboard's Model Type sets the route; without it, the Solution/Storage flags do.
+      ...routeFromModelType(parseModelType(job.modelType ?? ''), { isSolution: Boolean(job.isSolution), isStorage: Boolean(job.isStorage) }),
       quotationMode: 'aaS',
       inputRow: index + 2,
       source: source.kind === 'detailed-excel' && !source.instructions?.length
@@ -25,7 +25,7 @@ export function prepareRunJobs(jobs: OcaJob[]): OcaJob[] {
 
 export function writeRunWorkbook(jobs: OcaJob[], target: string): void {
   const modelRows = jobs.map((job) => ({
-    'Job ID': job.jobId, 'Model Number': job.modelNumber, 'Model Description': job.modelDescription ?? '',
+    'Job ID': job.jobId, 'Model Number': job.modelNumber, 'Model Type': job.modelType ?? '', 'Model Description': job.modelDescription ?? '',
     Solution: job.isSolution ? 'Yes' : 'No', 'Solution Name': job.solutionName ?? '',
     Storage: job.isStorage ? 'Yes' : 'No',
     'Integration Rack Part number': job.integrationRackPartNumber ?? '', Server: job.server ?? '',

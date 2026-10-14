@@ -1,12 +1,13 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { env } from '../config/env';
 import { waitForBlockingOverlay } from '../core/waits';
+import type { PageSnapshot } from '../reporting/html-capture';
 
 /** The configuration entry in OCA's BOM tab (OCA_EXPECTED_PAGE_TEXT, default 'OCA Config 2'). */
 export const BOM_CONFIG_NAME = env.expectedPageText;
 
 export class BillingTier {
-  constructor(private readonly page: Page) {}
+  constructor(private readonly page: Page, private readonly snapshot?: PageSnapshot) {}
   async run(): Promise<void> {
     const bom = this.page.getByRole('link', { name: 'BOM', exact: true }).filter({ visible: true }).first();
     await expect(bom).toBeVisible({ timeout: 60_000 }); await bom.click(); await waitForBlockingOverlay(this.page);
@@ -26,11 +27,66 @@ export class BillingTier {
       .or(dialog.locator('input[type="button"][value="OK" i], input[type="submit"][value="OK" i]'))
       .filter({ visible: true }).first();
     await expect(ok, 'Billing Tier Setup OK button').toBeVisible({ timeout: 60_000 });
+    await this.fillManualCapacity(dialog);
+    if (await this.isDisabled(ok)) await this.acknowledgeIncomplete(dialog, ok);
     console.log('[STEP] Closing Billing Tier Setup with OK');
     await ok.click({ force: true });
     await expect(dialog, 'Billing Tier Setup dialog should close after OK').toBeHidden({ timeout: 60_000 });
     await this.page.locator('.ui-widget-overlay.ui-front, .ui-widget-overlay')
       .waitFor({ state: 'hidden', timeout: 60_000 });
     await waitForBlockingOverlay(this.page);
+  }
+
+  /** OCA keeps OK disabled (class billingtier-disabled) until required entries are made. */
+  private async isDisabled(ok: Locator): Promise<boolean> {
+    return /\bbillingtier-disabled\b/.test(await ok.getAttribute('class').catch(() => '') ?? '')
+      || await ok.isDisabled().catch(() => false);
+  }
+
+  /**
+   * Storage models (S2U63A, DL380 Gen11 Data Solutions) bill by a capacity OCA does not fill:
+   * "Written Usable TiB. Manual entry required in OCA." The cell (td.btier-editableNumber) shows 0
+   * with an edit pencil, and OK stays disabled until it is set. Each such cell still at 0 gets
+   * OCA_MANUAL_BILLING_CAPACITY (default 1).
+   */
+  private async fillManualCapacity(dialog: Locator): Promise<void> {
+    const cells = dialog.locator('td.btier-editableNumber').filter({ visible: true });
+    const value = env.manualBillingCapacity;
+    for (let index = 0; index < await cells.count(); index += 1) {
+      const cell = cells.nth(index);
+      // Only the number counts; the pencil icon may add text of its own.
+      const current = (await cell.innerText().catch(() => '')).trim().match(/^[\d.,]*/)?.[0] ?? '';
+      if (!/^0*(?:\.0+)?$/.test(current)) continue;
+      const tier = (await cell.locator('xpath=ancestor::tr[1]').locator('td.btier-name').first().innerText().catch(() => ''))
+        .replace(/\s+/g, ' ').trim();
+      console.log(`[STEP] Billing Tier ${tier || `row ${index + 1}`}: capacity needs manual entry; entering ${value}`);
+      const pencil = cell.locator('.btier-edit-pencil').first();
+      await ((await pencil.isVisible().catch(() => false)) ? pencil : cell).click({ force: true });
+      const input = cell.locator('input:not([type="checkbox"]):not([type="hidden"])').filter({ visible: true }).first();
+      if (!await input.isVisible({ timeout: 3_000 }).catch(() => false)) {
+        console.log('[WARN] No input appeared in the Billing Tier capacity cell after clicking it');
+        await this.snapshot?.('WARN-Billing Tier capacity cell did not open for entry');
+        continue;
+      }
+      await input.fill(value);
+      await input.press('Enter');
+      await waitForBlockingOverlay(this.page);
+      const now = (await cell.innerText().catch(() => '')).trim().match(/^[\d.,]*/)?.[0] ?? '';
+      if (now && /^0*(?:\.0+)?$/.test(now)) console.log(`[WARN] Billing Tier capacity still reads ${now} after entering ${value}`);
+    }
+  }
+
+  /**
+   * OCA's own way past an incomplete Billing Tier Setup: "I Acknowledge that the configuration is
+   * incomplete, and I will re-run Billing Tier Setup before Quoting it" (#bt_ack_checkbox).
+   */
+  private async acknowledgeIncomplete(dialog: Locator, ok: Locator): Promise<void> {
+    const label = dialog.locator('label[for="bt_ack_checkbox"]').filter({ visible: true }).first();
+    if (!await label.isVisible().catch(() => false)) return;
+    console.log('[WARN] Billing Tier Setup OK is disabled; ticking "I Acknowledge that the configuration is incomplete"');
+    await this.snapshot?.('WARN-Billing Tier Setup incomplete');
+    await label.click({ force: true });
+    await expect.poll(() => this.isDisabled(ok), { timeout: 10_000, message: 'Billing Tier Setup OK enabled after acknowledging' })
+      .toBe(false).catch(() => undefined);
   }
 }

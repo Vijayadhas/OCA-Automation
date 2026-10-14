@@ -100,6 +100,8 @@ Main code: `src/automation/component-engine.ts` (`ComponentEngine`),
 | 23 | Excel check (offline, Python mirror of the reader): `Smart Chassis Product = Automatic` became a product named "Automatic" x0; most columns were matched only by exact header text, so `processor qty` or a trailing space silently made a component random | `Automatic` = keep OCA's selection; every column matched ignoring case and spaces (CLI and dashboard upload share `ExcelReader`) |
 | 24 | Requirement from the project lead: a failed model or component must not end the run; try other options | Any model failure is retried from the start (`OCA_MODEL_ATTEMPTS`, default 3) except `ModelNotFoundError`; a closed/crashed browser is relaunched; an Excel product that fails is replaced by another option of its section (`Changed:` in Selected Components), else left to OCA; trace/HTML/result-writing failures never stop the batch |
 | 25 | Requirements (2026-10-15): Processor, Memory, Support Services mandatory; no automatic retry for now | Missing selection fails the model before Save (`MandatorySelectionError`); `OCA_MODEL_ATTEMPTS` defaults to 1 |
+| 26 | Solution models never set Processor/Memory (S3V83A: they belong to the server inside the solution) | After the Solution Wizard, each "<server> #n" configuration from the full navigation is opened and configured like a server, with the mandatory check (`ConfigurationNavigation`) |
+| 27 | Results: Start/End BOM UCIDs hard to find; model route only by Yes/No columns | Dashboard UCID columns and a "BOM UCIDs" sheet; `Model Type` input (Server/Solution/Storage) |
 
 ## 5. Manual QA workflow (from the team's training video, 2026-10-14)
 
@@ -186,4 +188,4 @@ npm run ui        # dashboard at http://localhost:4173
 ```
 
 Useful environment variables: `OCA_BASE_URL`, `OCA_AUTH_WAIT_MS`, `OCA_MAX_RANDOM_CPU_WATTS`
-(default 270), `OCA_MODEL_ATTEMPTS` (default 1 = no automatic retry, since 2026-10-15; old name `OCA_RULE_CONFLICT_ATTEMPTS`), `OCA_UI_PORT`.
+(default 270), `OCA_MODEL_ATTEMPTS` (default 1 = no automatic retry, since 2026-10-15; old name `OCA_RULE_CONFLICT_ATTEMPTS`), `OCA_MANUAL_BILLING_CAPACITY` (default 1; storage Billing Tier "Written Usable TiB"), `OCA_UI_PORT`.

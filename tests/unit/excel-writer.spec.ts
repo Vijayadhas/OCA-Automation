@@ -26,3 +26,24 @@ test('writes service and Start/End BOM details to the result workbook', async ()
     'Start Allocated Memory': '109', 'End Allocated Memory': '327',
   });
 });
+
+test('lists each model\'s Start and End BOM UCIDs on a last sheet, with the failure reason as comment', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'oca-results-'));
+  const writer = new ExcelWriter(directory, path.join(directory, 'models.xlsx'));
+  const done = createPendingResult('JOB-1', 'P72176-B21');
+  Object.assign(done, { executionStatus: 'Success', startBomId: 'START-1', endBomId: 'END-1', endBomAssociated: 'Yes', endBomStatus: 'Generated and associated' });
+  const failed = createPendingResult('JOB-2', 'S2U63A');
+  Object.assign(failed, { executionStatus: 'Failed', errorStep: 'Open BOM and Billing Tier Setup', errorMessage: 'Billing Tier Setup dialog should close after OK' });
+  await writer.writeResult(done);
+  await writer.writeResult(failed);
+
+  const workbook = XLSX.readFile(writer.outputPath);
+  expect(workbook.SheetNames.at(-1)).toBe('BOM UCIDs');
+  expect(XLSX.utils.sheet_to_json<Record<string, string>>(workbook.Sheets['BOM UCIDs'], { defval: '' })).toEqual([
+    { 'Job ID': 'JOB-1', 'Model Number': 'P72176-B21', 'Start BOM UCID': 'START-1', 'End BOM UCID': 'END-1',
+      'End BOM Associated': 'Yes', 'Execution Status': 'Success', Comments: 'Generated and associated' },
+    { 'Job ID': 'JOB-2', 'Model Number': 'S2U63A', 'Start BOM UCID': '', 'End BOM UCID': '',
+      'End BOM Associated': 'No', 'Execution Status': 'Failed',
+      Comments: 'Open BOM and Billing Tier Setup: Billing Tier Setup dialog should close after OK' },
+  ]);
+});

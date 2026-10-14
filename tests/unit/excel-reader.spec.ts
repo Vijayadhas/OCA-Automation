@@ -160,3 +160,29 @@ test('"Automatic" keeps OCA\'s selection instead of naming a product "Automatic"
   expect(chassis).toMatchObject({ selectionType: 'default' });
   expect(chassis?.productNumber).toBeUndefined();
 });
+
+function modelsOnly(models: Record<string, unknown>[]): string {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'oca-excel-'));
+  const file = path.join(directory, 'input.xlsx');
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(models), 'Models');
+  XLSX.writeFile(workbook, file);
+  return file;
+}
+
+test('Model Type sets the route; blank falls back to the Solution and Storage columns', () => {
+  const jobs = new ExcelReader().read(modelsOnly([
+    { 'Job ID': 'J-1', 'Model Number': 'P72176-B21', 'Model Type': 'Server', Storage: 'Yes' },
+    { 'Job ID': 'J-2', 'Model Number': 'S3V83A', 'model type': ' solutions ' },
+    { 'Job ID': 'J-3', 'Model Number': 'S2U63A', 'Model Type': 'STORAGE' },
+    { 'Job ID': 'J-4', 'Model Number': 'S3V83A', Solution: 'Yes' },
+  ]));
+  expect(jobs.map((job) => [job.modelType, job.isSolution, job.isStorage])).toEqual([
+    ['Server', false, false], ['Solution', true, false], ['Storage', false, true], [undefined, true, false],
+  ]);
+});
+
+test('rejects a Model Type that is not Server, Solution, or Storage', () => {
+  expect(() => new ExcelReader().read(modelsOnly([{ 'Job ID': 'J-1', 'Model Number': 'P72176-B21', 'Model Type': 'Switch' }])))
+    .toThrow("Models row 2: Model Type 'Switch' is not one of Server, Solution, Storage");
+});

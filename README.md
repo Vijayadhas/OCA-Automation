@@ -32,7 +32,7 @@ adding real job data if you want to preserve the example.
 
 ### Recommended single-sheet columns
 
-`Job ID`, `Model Number`, `Model Description`, `Solution`, `Solution Name`, `Integration Rack Part number`, `Server`,
+`Job ID`, `Model Number`, `Model Type`, `Model Description`, `Solution`, `Solution Name`, `Integration Rack Part number`, `Server`,
 `Quotation Mode`, `Storage`, `Processor`, `Processor Qty`, `Memory`, `Memory Qty`, `Smart Chassis Product`,
 `Smart Chassis Qty`, `Chassis Config`, `Power Supply`,
 `Power Qty`, `Service`, `Generate End BOM`, `Enabled`
@@ -41,6 +41,11 @@ Column names are matched ignoring case and spaces (`processor qty` reads as `Pro
 Use `Default` when OCA should retain its default selection. `Automatic` (for an automatically
 managed Smart Chassis choice) behaves the same way. Quotation Mode must be `aaS`. If Job ID is blank, the tool assigns
 `ROW-<worksheet-row>`.
+
+`Model Type` decides the route: `Server` (Menu tab), `Solution` (Solution Wizard), or `Storage`
+(storage flow); `Solutions`/`Servers` and any letter case are accepted, and any other value is rejected
+before the run starts. When `Model Type` is given, it overrides `Solution` and `Storage`. When it is
+blank, those older columns decide, and a workspace that opens only a Solution Wizard is still detected.
 
 Set `Storage` to `Yes` for a standalone storage model. The storage flow selects available Cloud
 Connectivity, Controller Node Models, and Capacity choices from OCA and derives quantities from the
@@ -114,8 +119,8 @@ Open `http://localhost:4173`. The dashboard accepts the existing Excel format or
 component entry, starts the same Playwright automation, shows the current model and batch progress,
 and provides live results plus an Excel download. Runs are stored locally under `.oca-ui/runs`.
 A manually added model with no components uses random Processor, Memory, Smart Chassis, and Power
-Supplies selections, exactly like a blank Models-sheet row. Tick **Storage model** or **Solution
-Wizard model** in the model dialog when needed. Only one run can be active at a time because runs
+Supplies selections, exactly like a blank Models-sheet row. Choose **Model type** (Server, Solution,
+or Storage; or Detect automatically) in the model dialog. Only one run can be active at a time because runs
 share the browser profile; **Stop after current job** finishes the active model, then closes the browser.
 In the browser, each product, dropdown, or service option is scrolled into view and outlined in orange
 for a moment just before it is selected, so the run can be followed.

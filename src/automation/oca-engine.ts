@@ -7,7 +7,8 @@ import { waitForBlockingOverlay } from '../core/waits';
 import { safeClick } from '../core/interactions';
 import { ModelSearch } from './model-search';
 import { ComponentEngine, type ExecutionOutcome } from './component-engine';
-import { isBrowserClosedError } from '../core/errors';
+import { isBrowserClosedError, MandatorySelectionError } from '../core/errors';
+import { ConfigurationNavigation } from './configuration-navigation';
 import { getErrorMessage } from '../core/excel';
 import type { ComponentInstruction } from '../models/component-instruction';
 import { BillingTier } from './billing-tier';
@@ -68,7 +69,8 @@ export class OcaEngine {
     this.currentStep = 'Select aaS';
     await this.measure('Select aaS and verify landing', () => this.selectAasAndVerifyLanding());
     this.currentStep = 'Search model';
-    console.log(`[INFO] Excel model selection: description=${job.modelDescription ?? job.solutionName ?? '<blank>'}; solution=${job.isSolution ? 'Yes' : 'No'}; integration rack=${job.integrationRackPartNumber ?? '<blank>'}`);
+    const route = job.isStorage ? 'Storage' : job.isSolution ? 'Solution' : 'Server';
+    console.log(`[INFO] Excel model selection: model type=${job.modelType ? route : `<blank>, treated as ${route}`}; description=${job.modelDescription ?? job.solutionName ?? '<blank>'}; integration rack=${job.integrationRackPartNumber ?? '<blank>'}`);
     const model = await this.measure('Search and open model', () =>
       new ModelSearch(this.context).searchAndOpen(this.activePage, {
         modelNumber: job.modelNumber,
@@ -86,9 +88,6 @@ export class OcaEngine {
     // Copies: random picks are written onto each instruction, and a rule-conflict retry must
     // start again from the Excel rows, not from the previous attempt's picks.
     const instructions = job.source.instructions.map((instruction) => ({ ...instruction }));
-    const executedInstructions = [] as typeof instructions;
-    // Components that could not be set as asked, reported with the results.
-    const substitutions: string[] = [];
     const useSolutionWizard = await this.shouldUseSolutionWizard(job);
     if (job.isStorage) {
       this.currentStep = 'Configure Storage model';
@@ -100,33 +99,14 @@ export class OcaEngine {
       const selections = await this.measure('Configure Solution Wizard', () =>
         new SolutionWizard(this.activePage).configure(instructions, job.server));
       result.selectedComponents = selections.map((item) => `${item.label}: ${item.text}`).join('; ');
-    } else {
-      this.currentStep = 'Load Menu sections';
-      await this.measure('Load Menu sections', () => this.components.ensureMenuLoaded());
-      this.currentStep = 'Show all component products';
-      await this.measure('Show all component products', () => this.components.showAllProducts());
-      for (const instruction of instructions) {
-        this.currentStep = `Component ${instruction.sequence}: ${instruction.productNumber ?? instruction.section}`;
-        console.log(`[STEP] ${this.currentStep}`);
-        let outcome: ExecutionOutcome;
-        try {
-          outcome = await this.measure(this.currentStep, () => this.components.executeGeneric(instruction));
-        } catch (error) {
-          if (isBrowserClosedError(error)) throw error;
-          if (!await this.recoverComponent(instruction, error, substitutions)) continue;
-          outcome = 'done';
-        }
-        if (outcome === 'skipped') {
-          const ignored = instruction.selectionType === 'random' || instruction.selectionType === 'default'
-            ? '' : `; ${instruction.selectionType} ${instruction.productNumber ?? instruction.configurationText ?? ''} was not applied`;
-          console.log(`[SKIP] ${instruction.section} section is not offered for ${job.modelNumber}${ignored}`);
-          continue;
-        }
-        executedInstructions.push(instruction);
+      // dHCI solutions (S3V83A) hold their servers as separate configurations; Processor and Memory are set there.
+      const serverModel = selections.find((item) => /^Server Model$/i.test(item.label));
+      if (serverModel) {
+        const servers = await this.configureSolutionServers(job, instructions, serverModel.text);
+        result.selectedComponents += `${result.selectedComponents ? '; ' : ''}${servers}`;
       }
-      result.selectedComponents = executedInstructions.map((item) =>
-        `${item.productNumber ?? item.configurationText ?? item.section}${item.quantity == null ? '' : ` x${item.quantity}`}`).join('; ');
-      if (substitutions.length) result.selectedComponents += `; Changed: ${substitutions.join('; ')}`;
+    } else {
+      result.selectedComponents = await this.configureMenuComponents(job, instructions);
     }
 
     this.currentStep = 'Resolve required configuration errors';
@@ -144,7 +124,7 @@ export class OcaEngine {
     result.selectedComponents += `${result.selectedComponents ? '; ' : ''}Support Services: ${support.serviceExperience}; Term: ${support.term}; Data Privacy: ${support.dataPrivacy}`;
     this.currentStep = 'Open BOM and Billing Tier Setup';
     console.log('[STEP] Opening BOM tab');
-    await this.measure('Billing Tier Setup', () => new BillingTier(this.activePage).run());
+    await this.measure('Billing Tier Setup', () => new BillingTier(this.activePage, (label) => this.snapshot(label)).run());
     this.currentStep = 'Save OCA configuration';
     const save = await this.saveWithRequiredSelectionRecovery();
     result.ucid = save.ucid; result.ocaConfigStatus = save.status;
@@ -173,6 +153,76 @@ export class OcaEngine {
     return result;
   }
 
+  /**
+   * Sets the Menu components of the configuration on screen (a server, or a server inside a
+   * solution) and returns the summary for Selected Components.
+   */
+  private async configureMenuComponents(job: OcaJob, instructions: ComponentInstruction[]): Promise<string> {
+    const executedInstructions: ComponentInstruction[] = [];
+    // Components that could not be set as asked, reported with the results.
+    const substitutions: string[] = [];
+    this.currentStep = 'Load Menu sections';
+    await this.measure('Load Menu sections', () => this.components.ensureMenuLoaded());
+    this.currentStep = 'Show all component products';
+    await this.measure('Show all component products', () => this.components.showAllProducts());
+    for (const instruction of instructions) {
+      this.currentStep = `Component ${instruction.sequence}: ${instruction.productNumber ?? instruction.section}`;
+      console.log(`[STEP] ${this.currentStep}`);
+      let outcome: ExecutionOutcome;
+      try {
+        outcome = await this.measure(this.currentStep, () => this.components.executeGeneric(instruction));
+      } catch (error) {
+        if (isBrowserClosedError(error)) throw error;
+        if (!await this.recoverComponent(instruction, error, substitutions)) continue;
+        outcome = 'done';
+      }
+      if (outcome === 'skipped') {
+        const ignored = instruction.selectionType === 'random' || instruction.selectionType === 'default'
+          ? '' : `; ${instruction.selectionType} ${instruction.productNumber ?? instruction.configurationText ?? ''} was not applied`;
+        console.log(`[SKIP] ${instruction.section} section is not offered for ${job.modelNumber}${ignored}`);
+        continue;
+      }
+      executedInstructions.push(instruction);
+    }
+    let summary = executedInstructions.map((item) =>
+      `${item.productNumber ?? item.configurationText ?? item.section}${item.quantity == null ? '' : ` x${item.quantity}`}`).join('; ');
+    if (substitutions.length) summary += `; Changed: ${substitutions.join('; ')}`;
+    return summary;
+  }
+
+  /**
+   * A dHCI solution (S3V83A) puts each server picked in its Solution Wizard ("(P54202-B21)HPE DL325
+   * Gen11 GPU CTO Svr") into its own configuration, listed in OCA's full navigation as "HPE DL325 Gen11
+   * GPU CTO Svr #1". Processor and Memory are mandatory and live there, so each one is opened and
+   * configured like a single server, checked, and the solution level is opened again.
+   */
+  private async configureSolutionServers(job: OcaJob, instructions: ComponentInstruction[], serverModel: string): Promise<string> {
+    const navigation = new ConfigurationNavigation(this.activePage, (label) => this.snapshot(label));
+    const solutionLevel = await navigation.currentLevel();
+    const serverName = serverModel.replace(/^\s*\([^)]*\)\s*/, '').trim();
+    this.currentStep = 'Find servers inside the solution';
+    const entries = await this.measure(this.currentStep, () => navigation.serverEntries(serverName));
+    if (!entries.length) {
+      throw new MandatorySelectionError(`Processor and Memory are mandatory, but no server configuration "${serverName} #n" was found in the solution's navigation; the configuration was not saved`);
+    }
+    console.log(`[STEP] Servers inside the solution (${entries.length}): ${entries.join(', ')}`);
+    const summaries: string[] = [];
+    for (const entry of entries) {
+      this.currentStep = `Open ${entry}`;
+      await this.measure(this.currentStep, () => navigation.open(entry));
+      // Fresh copies: random picks are written onto each instruction.
+      const summary = await this.configureMenuComponents(job, instructions.map((instruction) => ({ ...instruction })));
+      this.currentStep = `Resolve required configuration errors in ${entry}`;
+      await this.measure(this.currentStep, () => resolveConfigurationErrors(this.activePage, this.components));
+      this.currentStep = `Check mandatory Processor and Memory in ${entry}`;
+      for (const section of MANDATORY_SECTIONS) await this.components.mandatorySelection(section);
+      summaries.push(`${entry}: ${summary}`);
+      this.currentStep = `Return to ${solutionLevel || 'the solution'}`;
+      await this.measure(this.currentStep, () => navigation.returnTo(solutionLevel));
+    }
+    return summaries.join('; ');
+  }
+
   private async saveWithRequiredSelectionRecovery() {
     try {
       return await this.measure('Save OCA configuration', () => new SaveFlow(this.activePage).save());
@@ -184,7 +234,7 @@ export class OcaEngine {
         recoverRequiredMenuSelections(this.activePage, this.components));
       this.currentStep = 'Refresh Billing Tier Setup after Menu recovery';
       console.log('[STEP] Reopening BOM after required Menu selections were repaired');
-      await this.measure('Refresh Billing Tier Setup after Menu recovery', () => new BillingTier(this.activePage).run());
+      await this.measure('Refresh Billing Tier Setup after Menu recovery', () => new BillingTier(this.activePage, (label) => this.snapshot(label)).run());
       this.currentStep = 'Retry Save OCA configuration';
       return await this.measure('Retry Save OCA configuration', () => new SaveFlow(this.activePage).save());
     }
@@ -198,7 +248,9 @@ export class OcaEngine {
     const hasSolutionTab = await solutionTab.isVisible({ timeout: 2_000 }).catch(() => false);
     const hasMenuSections = await menuSections.count() > 0;
     if (hasSolutionTab && !hasMenuSections) {
-      console.log('[WARN] Excel Solution flag was not detected, but this is a Solution Wizard-only workspace; using Solution Wizard');
+      console.log(job.modelType
+        ? `[WARN] Model Type is ${job.modelType}, but OCA opened a Solution Wizard-only workspace; using Solution Wizard (set Model Type to Solution)`
+        : '[INFO] Model Type is blank and OCA opened a Solution Wizard-only workspace; using Solution Wizard');
       return true;
     }
     return false;

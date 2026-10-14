@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import type { OcaJob } from '../models/job';
+import { parseModelType, routeFromModelType, type OcaJob } from '../models/job';
 import { isSelectionType, type ComponentInstruction, type SelectionType } from '../models/component-instruction';
 import { ExcelValidator } from './excel-validator';
 
@@ -31,6 +31,10 @@ const solutionFlag = (row: Row): boolean => {
   );
   return /solution\s*wizard/i.test(text(description));
 };
+/** "Model Type" (Server / Solution / Storage) sets the route; without it the old Solution and Storage columns do. */
+const routeOf = (row: Row) => routeFromModelType(parseModelType(text(cellByHeader(row, 'Model Type'))), {
+  isSolution: solutionFlag(row), isStorage: bool(cellByHeader(row, 'Storage'), false),
+});
 
 export class ExcelReader {
   constructor(private readonly validator = new ExcelValidator()) {}
@@ -79,8 +83,7 @@ export class ExcelReader {
         integrationRackPartNumber: text(cellByHeader(row, 'Integration Rack Part number', 'Integration Rack Part Number')) || undefined,
         server: text(cellByHeader(row, 'Server')) || undefined,
         solutionName: text(cellByHeader(row, 'Solution Name', 'Product or Solution Description')) || undefined,
-        isSolution: solutionFlag(row),
-        isStorage: bool(cellByHeader(row, 'Storage'), false),
+        ...routeOf(row),
         quotationMode: 'aaS',
         serviceType: text(cellByHeader(row, 'Service Type')) || 'Default',
         generateEndBom: bool(cellByHeader(row, 'Generate End BOM'), true),
@@ -113,8 +116,7 @@ export class ExcelReader {
         integrationRackPartNumber: text(cellByHeader(row, 'Integration Rack Part number', 'Integration Rack Part Number')) || undefined,
         server: text(cellByHeader(row, 'Server')) || undefined,
         solutionName: text(cellByHeader(row, 'Solution Name', 'Product or Solution Description')) || undefined,
-        isSolution: solutionFlag(row),
-        isStorage: bool(cellByHeader(row, 'Storage'), false),
+        ...routeOf(row),
         quotationMode: 'aaS',
         serviceType: text(cellByHeader(row, 'Service Type')) || text(cellByHeader(row, 'Service')) || 'Random',
         generateEndBom: bool(cellByHeader(row, 'Generate End BOM', 'End BOM Required'), true),
