@@ -199,24 +199,26 @@ export class OcaEngine {
   private async configureSolutionServers(job: OcaJob, instructions: ComponentInstruction[], serverModel: string): Promise<string> {
     const navigation = new ConfigurationNavigation(this.activePage, (label) => this.snapshot(label));
     const solutionLevel = await navigation.currentLevel();
-    const serverName = serverModel.replace(/^\s*\([^)]*\)\s*/, '').trim();
+    // "(P53921-B21#GTA) HPE DL385 Gen11 8SFF CTO Svr": the part number names the server in OCA's tree.
+    const partNumber = serverModel.match(/^\s*\(([^)]+)\)/)?.[1]?.trim() ?? '';
     this.currentStep = 'Find servers inside the solution';
-    const entries = await this.measure(this.currentStep, () => navigation.serverEntries(serverName));
+    const entries = partNumber ? await this.measure(this.currentStep, () => navigation.entriesForPart(partNumber)) : [];
     if (!entries.length) {
-      throw new MandatorySelectionError(`Processor and Memory are mandatory, but no server configuration "${serverName} #n" was found in the solution's navigation; the configuration was not saved`);
+      throw new MandatorySelectionError(`Processor and Memory are mandatory, but the server picked in the Solution Wizard (${serverModel}) `
+        + 'was not found in the solution\'s navigation; the configuration was not saved');
     }
-    console.log(`[STEP] Servers inside the solution (${entries.length}): ${entries.join(', ')}`);
+    console.log(`[STEP] Servers inside the solution (${entries.length}): ${entries.map((entry) => entry.label).join(', ')}`);
     const summaries: string[] = [];
     for (const entry of entries) {
-      this.currentStep = `Open ${entry}`;
+      this.currentStep = `Open ${entry.label}`;
       await this.measure(this.currentStep, () => navigation.open(entry));
       // Fresh copies: random picks are written onto each instruction.
       const summary = await this.configureMenuComponents(job, instructions.map((instruction) => ({ ...instruction })));
-      this.currentStep = `Resolve required configuration errors in ${entry}`;
+      this.currentStep = `Resolve required configuration errors in ${entry.label}`;
       await this.measure(this.currentStep, () => resolveConfigurationErrors(this.activePage, this.components));
-      this.currentStep = `Check mandatory Processor and Memory in ${entry}`;
+      this.currentStep = `Check mandatory Processor and Memory in ${entry.label}`;
       for (const section of MANDATORY_SECTIONS) await this.components.mandatorySelection(section);
-      summaries.push(`${entry}: ${summary}`);
+      summaries.push(`${entry.label}: ${summary}`);
       this.currentStep = `Return to ${solutionLevel || 'the solution'}`;
       await this.measure(this.currentStep, () => navigation.returnTo(solutionLevel));
     }
