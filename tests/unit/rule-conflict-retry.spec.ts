@@ -31,6 +31,23 @@ async function withMockedEngine(processJob: OcaEngine['processJob'], body: () =>
   }
 }
 
+test('does not retry a failed model by default; the team retries it by hand', async () => {
+  const { directory, input } = workbook('no-retry-default');
+  let attempts = 0;
+  await withMockedEngine(async () => {
+    attempts += 1;
+    throw new ConfigurationRuleError('Cannot continue to Services while OCA error icons remain: Processor');
+  }, async () => {
+    expect(await run(['--input', input, '--output', directory])).toBe(1);
+  });
+  expect(attempts).toBe(1);
+  expect(new ExcelWriter(directory, input).getExisting('JOB-001')?.executionStatus).toBe('Failed');
+});
+
+test.describe('with OCA_MODEL_ATTEMPTS=3', () => {
+test.beforeEach(() => { process.env.OCA_MODEL_ATTEMPTS = '3'; });
+test.afterEach(() => { delete process.env.OCA_MODEL_ATTEMPTS; });
+
 test('starts a model again with new picks when OCA rules stay unmet', async () => {
   const { directory, input } = workbook('retry-success');
   let attempts = 0;
@@ -82,4 +99,5 @@ test('starts a model again after any other failure, such as a timeout', async ()
     expect(await run(['--input', input, '--output', directory])).toBe(0);
   });
   expect(attempts).toBe(2);
+});
 });

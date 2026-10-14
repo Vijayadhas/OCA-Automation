@@ -113,32 +113,47 @@ app.post('/api/runs', (req, res) => {
   }
   runs.set(id, run);
   res.status(202).json({ id });
+  // Known from the start, so the results table fills as each model is written, not only at the end.
+  run.resultPath = path.join(outputDir, 'input-results.xlsx');
   run.process = child; run.status = 'running'; run.message = 'Opening browser session'; publish(run);
-  const consume = (chunk: Buffer) => {
-    for (const raw of chunk.toString().split(/\r?\n/)) {
-      const line = raw.trim(); if (!line) continue;
-      run.logs.push(line); if (run.logs.length > 250) run.logs.shift();
-      const started = line.match(/^\[(\d+)\/(\d+)] (.+?) - Running$/);
-      const ended = line.match(/^\[(\d+)\/(\d+)] (.+?) - (Success|Failed|Unsupported|Skipped)(?:\s-\s(.*))?$/);
-      if (started) {
-        run.currentJob = Number(started[1]); run.totalJobs = Number(started[2]);
-        run.currentModel = started[3]; run.message = 'Configuring model';
-      } else if (ended) {
-        run.currentJob = Number(ended[1]); run.completedJobs += 1; run.currentModel = ended[3];
-        if (ended[4] === 'Success') run.successfulJobs += 1; else if (ended[4] !== 'Skipped') run.failedJobs += 1;
-        run.message = ended[4] === 'Success' ? `Completed${ended[5] ? ` · ${ended[5]}` : ''}` : `${ended[4]}${ended[5] ? ` · ${ended[5]}` : ''}`;
-      } else if (line.includes('Complete manual authentication')) run.message = 'Waiting for OCA sign-in';
-      publish(run);
-    }
+  const handleLine = (line: string) => {
+    run.logs.push(line); if (run.logs.length > 250) run.logs.shift();
+    const started = line.match(/^\[(\d+)\/(\d+)] (.+?) - Running$/);
+    const ended = line.match(/^\[(\d+)\/(\d+)] (.+?) - (Success|Failed|Unsupported|Skipped)(?:\s-\s(.*))?$/);
+    if (started) {
+      run.currentJob = Number(started[1]); run.totalJobs = Number(started[2]);
+      run.currentModel = started[3]; run.message = 'Configuring model';
+    } else if (ended) {
+      run.currentJob = Number(ended[1]); run.completedJobs += 1; run.currentModel = ended[3];
+      if (ended[4] === 'Success') run.successfulJobs += 1; else if (ended[4] !== 'Skipped') run.failedJobs += 1;
+      run.message = ended[4] === 'Success' ? `Completed${ended[5] ? ` · ${ended[5]}` : ''}` : `${ended[4]}${ended[5] ? ` · ${ended[5]}` : ''}`;
+    } else if (line.includes('Complete manual authentication')) run.message = 'Waiting for OCA sign-in';
+    else if (line.startsWith('[RETRY]')) run.message = line.replace(/^\[RETRY]\s*/, 'Retrying: ');
+    else if (/Browser context closed \(unexpected\)/.test(line)) run.message = 'Browser closed; it will be opened again for the next attempt';
+    else if (line.startsWith('[STEP]')) run.message = line.replace(/^\[STEP]\s*/, '');
+    publish(run);
   };
-  child.stdout?.on('data', consume); child.stderr?.on('data', consume);
+  // A chunk can end in the middle of a line; keep the tail until the rest arrives.
+  const consumer = () => {
+    let pending = '';
+    return {
+      data: (chunk: Buffer) => {
+        const lines = (pending + chunk.toString()).split(/\r?\n/);
+        pending = lines.pop() ?? '';
+        for (const raw of lines) { const line = raw.trim(); if (line) handleLine(line); }
+      },
+      flush: () => { const line = pending.trim(); pending = ''; if (line) handleLine(line); },
+    };
+  };
+  const stdout = consumer(); const stderr = consumer();
+  child.stdout?.on('data', stdout.data); child.stderr?.on('data', stderr.data);
   child.on('error', (error) => {
     // 'close' is not guaranteed after a spawn error; release the active-run slot here.
     run.process = undefined; run.status = 'failed'; run.message = error.message; run.finishedAt = new Date().toISOString(); publish(run);
   });
   child.on('close', (code, signal) => {
+    stdout.flush(); stderr.flush();
     run.process = undefined; run.finishedAt = new Date().toISOString();
-    run.resultPath = path.join(outputDir, 'input-results.xlsx');
     if (run.status === 'stopping' || signal) { run.status = 'cancelled'; run.message = 'Run stopped'; }
     else if (code === 0) { run.status = 'completed'; run.message = 'All jobs completed'; }
     else { run.status = 'failed'; run.message = `Automation finished with exit code ${code ?? 'unknown'}`; }
@@ -178,7 +193,8 @@ const resultRows = (filePath: string) => {
 app.get('/api/runs/:id/results', (req, res) => {
   const run = runs.get(req.params.id);
   if (!run?.resultPath || !fs.existsSync(run.resultPath)) return res.json({ results: [] });
-  return res.json({ results: resultRows(run.resultPath) });
+  // The runner may be writing the workbook at this moment; the next update reads it again.
+  try { return res.json({ results: resultRows(run.resultPath) }); } catch { return res.json({ results: [], retry: true }); }
 });
 
 app.get('/api/runs/:id/download', (req, res) => {

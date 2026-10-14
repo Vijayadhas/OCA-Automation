@@ -69,8 +69,10 @@ export async function run(argv = process.argv.slice(2)): Promise<number> {
     }
   };
   console.log(`[INFO] Code version: ${codeVersion()}`);
-  // Attempts per model before it is reported as failed (OCA_MODEL_ATTEMPTS, formerly OCA_RULE_CONFLICT_ATTEMPTS; default 3).
-  const modelAttempts = Math.max(1, Number(process.env.OCA_MODEL_ATTEMPTS ?? process.env.OCA_RULE_CONFLICT_ATTEMPTS ?? 3) || 3);
+  // Attempts per model before it is reported as failed (OCA_MODEL_ATTEMPTS, formerly OCA_RULE_CONFLICT_ATTEMPTS).
+  // Default 1 (project lead, 2026-10-15): a failed model is not retried automatically; the team retries
+  // it by hand. Set OCA_MODEL_ATTEMPTS=3 to turn automatic retries back on.
+  const modelAttempts = Math.max(1, Number(process.env.OCA_MODEL_ATTEMPTS ?? process.env.OCA_RULE_CONFLICT_ATTEMPTS ?? 1) || 1);
 
   try {
     const context = await session.start();

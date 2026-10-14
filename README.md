@@ -71,11 +71,12 @@ menu does not offer the random quantity, the smallest quantity it offers is used
 skip CPUs above `OCA_MAX_RANDOM_CPU_WATTS` (default 270). A section the model does not offer, such as
 Smart Chassis on a DL580 Gen12, is skipped and logged. When a product given in Excel cannot be
 selected, another product of the same section is chosen and the change is listed under `Changed:` in
-`Selected Components`; when no option can be set, the component is left to OCA's own checks. When a
-model still fails (an OCA rule a random combination triggers, OCA failing to load, a timeout, or the
-browser closing), it is started again from the search with fresh random picks, up to
-`OCA_MODEL_ATTEMPTS` attempts (default 3; `OCA_RULE_CONFLICT_ATTEMPTS` is still read). Only a model
-OCA does not offer in aaS is not retried. A failed model never stops the batch.
+`Selected Components`; when no option can be set, the component is left to OCA's own checks.
+Processor, Memory, and Support Services (experience, term, data privacy) are mandatory: when any of
+them is not selected, the model fails before Save, so no configuration is saved and no End BOM is
+made. A failed model is not retried automatically (retry it by hand); set `OCA_MODEL_ATTEMPTS=3` to
+start a failed model again from the search with fresh random picks (`OCA_RULE_CONFLICT_ATTEMPTS` is
+still read). A model OCA does not offer in aaS is never retried. A failed model never stops the batch.
 Actual selections are written to `Selected Components` in the results workbook. Use the advanced
 `Components` sheet for additional or repeated component instructions.
 

@@ -45,7 +45,8 @@ test('accepts a Menu tab with sections', async ({ page }) => {
   await new ComponentEngine(page).ensureMenuLoaded(500);
 });
 
-test('opens OCA again when it fails to load, up to the attempt limit', async () => {
+test('opens OCA again when it fails to load, when automatic retries are on', async () => {
+  process.env.OCA_MODEL_ATTEMPTS = '3';
   const directory = test.info().outputPath('load-retry');
   fs.mkdirSync(directory, { recursive: true });
   const input = path.join(directory, 'models.xlsx');
@@ -68,6 +69,7 @@ test('opens OCA again when it fails to load, up to the attempt limit', async () 
   } finally {
     BrowserSession.prototype.start = originalStart;
     OcaEngine.prototype.processJob = originalProcess;
+    delete process.env.OCA_MODEL_ATTEMPTS;
   }
   expect(attempts).toBe(2);
   expect(new ExcelWriter(directory, input).getExisting('JOB-001')?.executionStatus).toBe('Success');

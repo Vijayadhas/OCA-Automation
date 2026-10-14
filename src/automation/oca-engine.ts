@@ -36,6 +36,9 @@ export async function recoverRequiredMenuSelections(
   await resolveConfigurationErrors(page, components);
 }
 
+/** Menu sections every server configuration must have a selection in before Save. */
+const MANDATORY_SECTIONS = ['Processor', 'Memory'];
+
 export class OcaEngine {
   private page?: Page;
   components!: ComponentEngine;
@@ -128,6 +131,11 @@ export class OcaEngine {
 
     this.currentStep = 'Resolve required configuration errors';
     await this.measure('Resolve required configuration errors', () => resolveConfigurationErrors(this.activePage, this.components));
+    if (!job.isStorage && !useSolutionWizard) {
+      // Processor and Memory are mandatory: without them the configuration is not saved and no End BOM is made.
+      this.currentStep = 'Check mandatory Processor and Memory';
+      for (const section of MANDATORY_SECTIONS) await this.components.mandatorySelection(section);
+    }
     this.currentStep = 'Select Support Services';
     const support = await this.measure('Select Support Services', () => new SupportServices(this.activePage).select(job.serviceType));
     result.serviceExperience = support.serviceExperience;

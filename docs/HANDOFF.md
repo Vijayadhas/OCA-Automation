@@ -99,6 +99,7 @@ Main code: `src/automation/component-engine.ts` (`ComponentEngine`),
 | 22 | Could not tell which code produced a pasted log | Each run logs `[INFO] Code version: commit <hash> <date>` (or newest source file time for zip downloads). Check it first on every log |
 | 23 | Excel check (offline, Python mirror of the reader): `Smart Chassis Product = Automatic` became a product named "Automatic" x0; most columns were matched only by exact header text, so `processor qty` or a trailing space silently made a component random | `Automatic` = keep OCA's selection; every column matched ignoring case and spaces (CLI and dashboard upload share `ExcelReader`) |
 | 24 | Requirement from the project lead: a failed model or component must not end the run; try other options | Any model failure is retried from the start (`OCA_MODEL_ATTEMPTS`, default 3) except `ModelNotFoundError`; a closed/crashed browser is relaunched; an Excel product that fails is replaced by another option of its section (`Changed:` in Selected Components), else left to OCA; trace/HTML/result-writing failures never stop the batch |
+| 25 | Requirements (2026-10-15): Processor, Memory, Support Services mandatory; no automatic retry for now | Missing selection fails the model before Save (`MandatorySelectionError`); `OCA_MODEL_ATTEMPTS` defaults to 1 |
 
 ## 5. Manual QA workflow (from the team's training video, 2026-10-14)
 
@@ -144,8 +145,8 @@ End BOM Setup from two models; for Synergy, the configuration dropdown and a com
 - Models seen so far: P72176-B21 and P72297-B21 (DL360-class) succeeded end to end before the later
   changes. P83540-B21 (DL580 Gen12) progressed through several repairs. P86628-B21 (DL110 Gen12)
   is waiting for a re-run with the M.2 fix.
-- The last known unit test run was 78/79 on `7444b8c`; the failure was fixed. **The typecheck and
-  unit tests haven't been run since**, so every commit from `31efdbd` to `629c830` is untested.
+- 2026-10-15: Node.js 24 is now installed on the development machine (`C:\Program Files\nodejs`),
+  so typecheck and unit tests run there: 102/102 pass after the DL320 fixes (change log).
 - Most change-log rows still say "Pending" for the run result.
 
 ## 7. To do next
@@ -185,4 +186,4 @@ npm run ui        # dashboard at http://localhost:4173
 ```
 
 Useful environment variables: `OCA_BASE_URL`, `OCA_AUTH_WAIT_MS`, `OCA_MAX_RANDOM_CPU_WATTS`
-(default 270), `OCA_MODEL_ATTEMPTS` (default 3; old name `OCA_RULE_CONFLICT_ATTEMPTS`), `OCA_UI_PORT`.
+(default 270), `OCA_MODEL_ATTEMPTS` (default 1 = no automatic retry, since 2026-10-15; old name `OCA_RULE_CONFLICT_ATTEMPTS`), `OCA_UI_PORT`.

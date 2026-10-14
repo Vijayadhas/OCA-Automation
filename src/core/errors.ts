@@ -4,6 +4,14 @@ export function isBrowserClosedError(error: unknown): boolean {
     .test(String(error));
 }
 
+/**
+ * Processor, Memory, or Support Services is not selected. These are mandatory (project lead): the
+ * configuration must not be saved and no End BOM generated without them.
+ */
+export class MandatorySelectionError extends Error {
+  constructor(message: string) { super(message); this.name = 'MandatorySelectionError'; }
+}
+
 /** OCA has no such model in aaS mode; starting the model again cannot help. */
 export class ModelNotFoundError extends Error {
   constructor(message: string) { super(message); this.name = 'ModelNotFoundError'; }

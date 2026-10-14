@@ -7,9 +7,12 @@ export async function waitBeforeAction(page: Page) {
 
 export async function waitForBlockingOverlay(page: Page) {
   const overlayStartedAt = Date.now();
+  // OCA can stack several overlays. locator.waitFor() fails at once on more than one match (strict
+  // mode), which used to skip this wait entirely; so wait until none of them is visible.
   await page
-    .locator('.blockUI.blockOverlay')
-    .waitFor({ state: 'hidden', timeout: 60_000 })
+    .waitForFunction(() => Array.from(document.querySelectorAll<HTMLElement>('.blockUI.blockOverlay'))
+      .every((element) => element.getClientRects().length === 0 || window.getComputedStyle(element).visibility === 'hidden'),
+    undefined, { timeout: 60_000, polling: 250 })
     .catch(() => {
       console.log('[INFO] Blocking overlay did not become hidden within 60 seconds; continuing with visible element checks');
     });

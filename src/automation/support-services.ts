@@ -1,6 +1,7 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { waitForBlockingOverlay } from '../core/waits';
 import { revealForViewer } from '../core/interactions';
+import { MandatorySelectionError } from '../core/errors';
 
 export interface SupportServiceSelection {
   serviceExperience: string;
@@ -43,6 +44,13 @@ export class SupportServices {
     );
     await waitForBlockingOverlay(this.page);
 
+    // Support Services are mandatory: a later choice can make OCA clear an earlier one, so all
+    // three must still be selected before the configuration is saved.
+    for (const [id, label] of [['service-experience', 'Service experience'], ['term', 'Term'], ['data-privacy-service', 'Data Privacy']]) {
+      if (!await support.locator(`#${id} input[type="radio"]:checked`).count()) {
+        throw new MandatorySelectionError(`Support Services are mandatory, but ${label} is not selected; the configuration was not saved`);
+      }
+    }
     return { serviceExperience, term, dataPrivacy };
   }
 

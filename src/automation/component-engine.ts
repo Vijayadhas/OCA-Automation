@@ -7,8 +7,9 @@ import { RadioHandler } from '../components/radio-handler';
 import { ConfigurationHandler } from '../components/configuration-handler';
 import { AutomaticDependencyHandler } from '../components/automatic-dependency-handler';
 import type { PageSnapshot } from '../reporting/html-capture';
-import { ocaProblemMessage } from '../core/oca-problem';
+import { dismissOcaMessageDialogs, ocaProblemMessage } from '../core/oca-problem';
 import { OcaPageLoadError } from './configuration-errors';
+import { MandatorySelectionError } from '../core/errors';
 
 export class UnsupportedComponentError extends Error {
   constructor(message: string) { super(message); this.name = 'UnsupportedComponentError'; }
@@ -33,6 +34,9 @@ export function modelWords(text: string): string[] {
     .flatMap((word) => [word, ...word.split('-')])
     .filter(isModelWord))];
 }
+
+/** Candidates a repair tries before giving up (the model is then retried with fresh picks). */
+const REPAIR_CANDIDATE_TRIES = 6;
 
 /** Words too general to tie an OCA rule to a choice title. */
 const GENERIC_WORDS = new Set(['and', 'or', 'of', 'the', 'for', 'with', 'per', 'must', 'be', 'selected', 'select',
@@ -130,6 +134,22 @@ export class ComponentEngine {
     if (loaded) return;
     const problem = await ocaProblemMessage(this.page);
     throw new OcaPageLoadError(`OCA's Menu tab has no component sections; the configuration did not load${problem ? `. OCA error: ${problem}` : ''}`);
+  }
+
+  /**
+   * The product selected in a mandatory section (Processor, Memory). Fails with
+   * MandatorySelectionError when the section is missing or nothing is selected in its main choice,
+   * so the configuration is never saved without it.
+   */
+  async mandatorySelection(sectionName: string): Promise<Selection> {
+    const section = await this.findSection(sectionName);
+    if (!section) throw new MandatorySelectionError(`${sectionName} is mandatory, but the ${sectionName} section was not found; the configuration was not saved`);
+    await this.open(section);
+    const choice = await this.mainChoice(section);
+    const existing = choice ? await this.existingSelection(choice.id) : null;
+    if (!existing) throw new MandatorySelectionError(`${sectionName} is mandatory, but nothing is selected in ${section.title}; the configuration was not saved`);
+    console.log(`[INFO] Mandatory ${sectionName}: ${existing.productNumber} x${existing.quantity}`);
+    return existing;
   }
 
   async showAllProducts(): Promise<void> {
@@ -356,7 +376,8 @@ export class ComponentEngine {
       // "... then the drive cage quantity must be Qty 2" (P83540-B21, 8EDSFF in 2P).
       const exact = text.match(/quantity must be\s*(?:qty\s*)?(\d+)/i);
       // "Minimum 2 and Maximum 2 of M.2 SSD Drive must be selected." (P86628-B21, DL110 Gen12).
-      const bounds = text.match(/Minimum\s*(\d+)\s*and\s*Maximum\s*(\d+)\s*of\b[^.]*\bmust be selected/i);
+      // Product names can contain dots ("M.2"), so the words between are matched lazily, not as [^.]*.
+      const bounds = text.match(/Minimum\s*(\d+)\s*and\s*Maximum\s*(\d+)\s*of\b.*?\bmust be selected/i);
       if (!range && !even && !exact && !bounds) continue;
       rule ??= { min: 0, max: Number.POSITIVE_INFINITY, even: false };
       if (range) { rule.min = Math.max(rule.min, Number(range[1])); rule.max = Math.min(rule.max, Number(range[2])); }
@@ -470,17 +491,31 @@ export class ComponentEngine {
       if (best === 0) continue;
       const named = scored.filter((item) => item.score === best);
       await this.openOwners(named.map((item) => item.id));
+      // "... then Qty=2 of Ethernet OCP adapter must be selected" (P75217-B21); "Min = 1" otherwise.
+      const count = Number(rule.ownText.match(/\b(?:Qty|Min)\s*=\s*(\d+)/i)?.[1] ?? 1) || 1;
       const candidates: Array<RowInfo & { choiceId: string }> = [];
-      const filled: string[] = [];
+      const filled: Array<Selection & { rowId: string; choiceId: string }> = [];
       for (const target of named) {
-        if (await this.existingSelection(target.id)) { filled.push(target.title); continue; }
+        const existing = await this.existingSelection(target.id);
+        if (existing) { filled.push({ ...existing, choiceId: target.id }); continue; }
         for (const row of await this.rowInfo(this.choiceRows(target.id))) if (isPickable(row)) candidates.push({ ...row, choiceId: target.id });
       }
-      // A named choice that already has a product means the rule wants something else; leave it to OCA's message.
+      const selected = filled.reduce((sum, item) => sum + item.quantity, 0);
+      // Enough products are already selected: the rule wants something else; leave it to OCA's message.
+      if (selected >= count) continue;
+      if (filled.length === 1) {
+        const [item] = filled;
+        const wanted = item.quantity + count - selected;
+        console.log(`[STEP] OCA rule "${rule.ownText}" needs ${count}; raising ${item.productNumber} from ${item.quantity} to ${wanted}`);
+        const row = this.page.locator(`[id=${JSON.stringify(item.rowId)}]`);
+        const set = await this.quantities.set(row, item.productNumber, wanted, false, { acceptOffered: true });
+        await this.enforceQuantityRule(item.choiceId, row, item.productNumber, set);
+        return true;
+      }
       if (filled.length || !candidates.length) continue;
-      console.log(`[STEP] OCA rule "${rule.ownText}" covers ${named.map((item) => item.title).join(', ')}; filling one of them: `
-        + candidates.map((row) => row.productNumber).join(', '));
-      await this.fillOne(named.map((item) => item.title).join(' / '), candidates);
+      console.log(`[STEP] OCA rule "${rule.ownText}" covers ${named.map((item) => item.title).join(', ')}; filling one of them`
+        + `${count > 1 ? ` with quantity ${count}` : ''}: ${candidates.map((row) => row.productNumber).join(', ')}`);
+      await this.fillOne(named.map((item) => item.title).join(' / '), candidates, count);
       return true;
     }
     return false;
@@ -495,14 +530,18 @@ export class ComponentEngine {
     }
   }
 
-  /** Sets one random candidate to quantity 1 (or what OCA offers), then into its choice's quantity rule. */
-  private async fillOne(label: string, candidates: Array<RowInfo & { choiceId: string }>): Promise<void> {
+  /**
+   * Sets one random candidate to the quantity (or what OCA offers), then into its choice's quantity
+   * rule. At most REPAIR_CANDIDATE_TRIES candidates are tried: on P75218-B21 all 24 network cards
+   * were tried one by one for over 8 minutes.
+   */
+  private async fillOne(label: string, candidates: Array<RowInfo & { choiceId: string }>, quantity = 1): Promise<void> {
     await this.tryRandomCandidates(label, candidates.map((row) => ({
       row: this.page.locator(`[id=${JSON.stringify(row.id)}]`), productNumber: row.productNumber, choiceId: row.choiceId,
     })), async (candidate) => {
-      const set = await this.quantities.set(candidate.row, candidate.productNumber, 1, false, { acceptOffered: true });
+      const set = await this.quantities.set(candidate.row, candidate.productNumber, quantity, false, { acceptOffered: true });
       return this.enforceQuantityRule(candidate.choiceId, candidate.row, candidate.productNumber, set);
-    });
+    }, REPAIR_CANDIDATE_TRIES);
   }
 
   /** Brings a committed quantity into OCA's rule for the choice; returns the quantity now committed. */
@@ -570,11 +609,13 @@ export class ComponentEngine {
   }
 
   private async tryRandomCandidates<T extends { row: Locator; productNumber: string }, R>(
-    section: string, candidates: T[], select: (candidate: T) => Promise<R>,
+    section: string, candidates: T[], select: (candidate: T) => Promise<R>, maxTries = Number.POSITIVE_INFINITY,
   ): Promise<R> {
     const remaining = [...candidates];
     const failures: string[] = [];
-    while (remaining.length) {
+    while (remaining.length && failures.length < maxTries) {
+      // A dialog left by OCA (e.g. "PCI Card Placement") blocks every click until it is closed.
+      await dismissOcaMessageDialogs(this.page);
       const [candidate] = remaining.splice(Math.floor(Math.random() * remaining.length), 1);
       const before = await this.quantities.committedQuantity(candidate.row, candidate.productNumber);
       console.log(`[STEP] Random ${section} candidate ${failures.length + 1}/${candidates.length}: ${candidate.productNumber}`);
@@ -589,6 +630,7 @@ export class ComponentEngine {
         console.log(`[WARN] ${section} candidate ${candidate.productNumber} failed: ${message}`);
         await this.page.keyboard.press('Escape');
         await waitForBlockingOverlay(this.page);
+        await dismissOcaMessageDialogs(this.page);
         const after = await this.quantities.committedQuantity(candidate.row, candidate.productNumber);
         if (after !== before) {
           if (!/^\d+$/.test(before)) throw new Error(`Cannot safely restore failed ${section} candidate ${candidate.productNumber}; previous quantity was unreadable`, { cause: error });
@@ -598,6 +640,7 @@ export class ComponentEngine {
         if (remaining.length) console.log(`[STEP] Trying another random ${section} candidate (${remaining.length} remaining)`);
       }
     }
+    if (remaining.length) throw new Error(`${failures.length} ${section} candidates failed; not trying the other ${remaining.length}: ${failures.join(' | ')}`);
     throw new Error(`All ${section} candidates failed: ${failures.join(' | ')}`);
   }
 

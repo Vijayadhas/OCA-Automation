@@ -128,6 +128,8 @@ export class QuantityHandler {
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       // dHCI tables are inconsistent: chassis rows open from the inner div,
       // while rebuilt node rows can open only from the owning quantity cell.
+      // A click while OCA's loading block is up is swallowed (P75218-B21 network cards).
+      await waitForBlockingOverlay(this.page);
       const attemptTarget = attempt === 1 || !(await quantityCell.isVisible().catch(() => false)) ? target : quantityCell;
       await attemptTarget.scrollIntoViewIfNeeded();
       const targetBox = await attemptTarget.boundingBox();
@@ -229,7 +231,11 @@ export class QuantityHandler {
     if (await input.isVisible({ timeout: 500 }).catch(() => false)) return (await input.inputValue()).trim();
     const inner = row.locator('.item_qty_div').filter({ visible: true }).first();
     if (await inner.isVisible()) return (await inner.textContent() ?? '').trim();
-    return ((await row.locator('.item_qty').filter({ visible: true }).first().textContent().catch(() => '')) ?? '').trim();
+    // A row without a quantity (e.g. a rule message naming the product) reads as '' instead of
+    // waiting for the action timeout.
+    const outer = row.locator('.item_qty').filter({ visible: true }).first();
+    if (!await outer.isVisible()) return '';
+    return ((await outer.textContent().catch(() => '')) ?? '').trim();
   }
 
   private async readCommitted(originalRow: Locator, productNumber: string): Promise<string> {
