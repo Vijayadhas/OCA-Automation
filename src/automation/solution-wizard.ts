@@ -2,6 +2,7 @@ import { expect, type Locator, type Page } from '@playwright/test';
 import type { ComponentInstruction } from '../models/component-instruction';
 import { waitForBlockingOverlay } from '../core/waits';
 import { QuantityHandler } from '../components/quantity-handler';
+import { ComponentEngine } from './component-engine';
 
 export async function openDhciDriveEnclosure(page: Page): Promise<void> {
   const header = page.locator('#section_header_driveEnclosureSection, [id*="section_header" i][id*="driveEnclosure" i]')
@@ -173,49 +174,29 @@ export class SolutionWizard {
     await menu.click({ force: true });
     await waitForBlockingOverlay(this.page);
 
+    // Sections and choices are found by their visible titles (as on server menus), not fixed ids.
+    const menuEngine = new ComponentEngine(this.page);
+    const pick = async (section: string, choice: string | undefined, quantity: number) => {
+      const item = await menuEngine.selectInChoice(section, choice, quantity);
+      selected.push({ label: choice ?? section, value: item.productNumber, text: `${item.description} x${item.quantity}` });
+    };
+    // OCA's rule on Node Chassis: "1 Chassis Minimum 2 node and Maximum 2 nodes required. 2 Chassis
+    // Minimum 3 nodes and Maximum 4 nodes required."
     const nodeCombination = Math.random() < 0.5
       ? { chassis: 2, nodes: 4 }
       : { chassis: 1, nodes: 2 };
     console.log(`[STEP] dHCI Controller Node combination: Node Chassis ${nodeCombination.chassis}, Node ${nodeCombination.nodes}`);
-    selected.push(await this.selectRandomMenuRow(
-      'nodechassisSection_nodeschassisChoice', 'Controller Node Chassis', nodeCombination.chassis, nodeCombination.chassis,
-    ));
-    selected.push(await this.selectRandomMenuRow(
-      'nodechassisSection_nodesChoice', 'Controller Node', nodeCombination.nodes, nodeCombination.nodes,
-    ));
-    // Controller chassis selections reveal a required Drive Enclosure dependency.
-    // The proven S3V83A flow opens this section before choosing Capacity, allowing
-    // OCA to calculate and apply the enclosure defaults.
-    await openDhciDriveEnclosure(this.page);
+    await pick('Controller Node Models', 'Node Chassis', nodeCombination.chassis);
+    await pick('Controller Node Models', 'Node', nodeCombination.nodes);
+    // Controller chassis selections reveal a required Drive Enclosure dependency. The proven S3V83A
+    // flow opens this section before choosing Capacity, so OCA applies the enclosure defaults.
+    console.log('[STEP] Opening dHCI Drive Enclosure section to apply its dependent defaults');
+    await menuEngine.openSection('Drive Enclosure');
+    await waitForBlockingOverlay(this.page);
     await this.disableRecommendedOnlyIfEnabled();
-    selected.push(await this.selectRandomMenuRow('hardDriveSection_NVMeSFFFESSDsChoice', 'Capacity', 16, 48));
-    selected.push(await this.selectRandomMenuRow('daccableSection_dacHostCablesChoice', 'DAC Cables', 8, 100));
-  }
-
-  private async selectRandomMenuRow(
-    elementId: string, label: string, minimum: number, maximum: number,
-  ): Promise<SolutionWizardSelection> {
-    const sectionKey = elementId.split('_')[0];
-    const rows = this.page.locator(`tr.item_tr[data-elementid="${elementId}"]`).filter({ visible: true });
-    const header = this.page.locator(`[id*="section_header" i][id*="${sectionKey}" i]`).filter({ visible: true }).first();
-    if (!(await rows.first().isVisible({ timeout: 1_000 }).catch(() => false))
-      && await header.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await this.scrollToSelection(header, `${label} section`);
-      await header.click({ force: true });
-      await waitForBlockingOverlay(this.page);
-    }
-    await expect(rows.first(), `${label} product rows`).toBeVisible({ timeout: 60_000 });
-    const row = rows.nth(Math.floor(Math.random() * await rows.count()));
-    await this.scrollToSelection(row, `${label} product`);
-    const productNumber = normalized(await row.locator('._pid').first().innerText());
-    const description = normalized(await row.locator('.item_desc').first().innerText().catch(() => productNumber));
-    // The lower bounds are known-valid business quantities (Capacity 16, DAC 8).
-    // Do not assume every integer in a permitted range is exposed by OCA's custom
-    // quantity dropdown (for example, 26 may not be an available menu option).
-    const quantity = minimum;
-    console.log(`[STEP] dHCI ${label}: ${description} (${productNumber}) x${quantity} (allowed ${minimum}-${maximum})`);
-    await this.quantities.set(row, productNumber, quantity, false);
-    return { label, value: productNumber, text: `${description} x${quantity}` };
+    // Known-valid business quantities: Capacity 16 drives, DAC cables 8.
+    await pick('Capacity', undefined, 16);
+    await pick('DAC Cables', undefined, 8);
   }
 
   private async disableRecommendedOnlyIfEnabled(): Promise<void> {

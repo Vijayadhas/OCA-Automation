@@ -284,6 +284,56 @@ export class ComponentEngine {
     await header.scrollIntoViewIfNeeded();
     await header.click({ force: true });
     await waitForBlockingOverlay(this.page);
+    if (await this.opened(section)) return;
+    // S3V83A: "Controller Node Models" stayed collapsed after the click on the header row's centre.
+    // A DOM click on the header's title element does not depend on what is drawn over the row.
+    console.log(`[WARN] Section ${section.title} did not open; clicking its title`);
+    await header.locator('.section_header_div').first().evaluate((element) => (element as HTMLElement).click())
+      .catch(() => header.evaluate((element) => (element as HTMLElement).click()));
+    await waitForBlockingOverlay(this.page);
+    if (!await this.opened(section)) console.log(`[WARN] Section ${section.title} still shows no choices after opening`);
+  }
+
+  /** Waits briefly for a section's content to show after it was clicked open. */
+  private async opened(section: MenuSection): Promise<boolean> {
+    return expect.poll(() => this.isOpen(section), { timeout: 5_000 }).toBe(true).then(() => true, () => false);
+  }
+
+  /**
+   * Selects one random product with the quantity (or the nearest OCA offers) in a section's choice
+   * named by its title (the section's main choice when no title is given). Used for solution menus
+   * such as S3V83A: "Controller Node Models" → "Node Chassis" and "Node". A choice can appear only
+   * after an earlier selection (Node after Node Chassis), so its rows are awaited.
+   */
+  async selectInChoice(sectionName: string, choiceTitle: string | undefined, quantity: number): Promise<Selection & { choiceTitle: string }> {
+    // A section can appear only after an earlier selection (S3V83A: Capacity after Drive Enclosure).
+    let found: MenuSection | null = null;
+    await expect.poll(async () => Boolean(found = await this.findSection(sectionName)), {
+      timeout: 60_000, message: `Section ${sectionName}`,
+    }).toBe(true);
+    const section = found as unknown as MenuSection;
+    await this.open(section);
+    let choice: MenuChoice | null = null;
+    await expect.poll(async () => {
+      const all = (await this.choices(section)).filter((item) => item.rows > 0);
+      choice = choiceTitle ? all.find((item) => normalize(item.title) === normalize(choiceTitle)) ?? null : await this.mainChoice(section);
+      return Boolean(choice);
+    }, { timeout: 60_000, message: `${section.title} choice ${choiceTitle ?? '(main)'}` }).toBe(true);
+    const target = choice as unknown as MenuChoice;
+    await this.open(section);
+    let rows: RowInfo[] = [];
+    await expect.poll(async () => (rows = (await this.rowInfo(this.choiceRows(target.id))).filter(isPickable)).length, {
+      timeout: 60_000, message: `Selectable rows of ${section.title} / ${target.title || target.id}`,
+    }).toBeGreaterThan(0);
+    const label = `${section.title}${target.title && normalize(target.title) !== normalize(section.title) ? ` / ${target.title}` : ''}`;
+    const picked = await this.tryRandomCandidates(label, rows.map((row) => ({
+      row: this.page.locator(`[id=${JSON.stringify(row.id)}]`), productNumber: row.productNumber, description: row.description,
+    })), async (candidate) => {
+      const set = await this.quantities.set(candidate.row, candidate.productNumber, quantity, false, { acceptOffered: true });
+      return { productNumber: candidate.productNumber, description: candidate.description, quantity: set };
+    }, REPAIR_CANDIDATE_TRIES);
+    console.log(`[STEP] ${label}: ${picked.productNumber} x${picked.quantity}`);
+    return { ...picked, choiceTitle: target.title };
   }
 
   async findProductRow(productNumber: string, description?: string): Promise<Locator> {
