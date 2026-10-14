@@ -1,7 +1,8 @@
 # CLAUDE.md
 
 Excel-driven Playwright (TypeScript) automation for HPE One Config Advanced (OCA). See `README.md`
-for features and `docs/DEVELOPMENT_WORKFLOW.md` for the development loop.
+for features and `docs/DEVELOPMENT_WORKFLOW.md` for the development loop. A new session should
+read `docs/HANDOFF.md` first: project history, issues solved, current state, and next steps.
 
 ## Constraints
 
