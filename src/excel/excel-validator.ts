@@ -17,8 +17,10 @@ export class ExcelValidator {
       if (!job.modelNumber) issues.push(`Models row ${job.inputRow}: Model Number is required`);
       if (job.quotationMode !== 'aaS') issues.push(`Models row ${job.inputRow}: Quotation Mode must be aaS`);
       if (job.isSolution && job.isStorage) issues.push(`Models row ${job.inputRow}: Solution and Storage cannot both be Yes`);
-      if (job.jobId && ids.has(job.jobId)) issues.push(`Models row ${job.inputRow}: duplicate Job ID ${job.jobId}`);
-      ids.add(job.jobId);
+      // Job IDs name result rows and capture folders, so "JOB-001" and "job-001 " are the same ID.
+      const id = (job.jobId ?? '').trim().toLowerCase();
+      if (id && ids.has(id)) issues.push(`Models row ${job.inputRow}: duplicate Job ID ${job.jobId}; every Job ID must be unique`);
+      ids.add(id);
       if (job.source.kind === 'detailed-excel') {
         this.validateInstructions(job.source.instructions, job, issues);
       }
