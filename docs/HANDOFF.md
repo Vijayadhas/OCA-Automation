@@ -100,18 +100,55 @@ Main code: `src/automation/component-engine.ts` (`ComponentEngine`),
 | 23 | Excel check (offline, Python mirror of the reader): `Smart Chassis Product = Automatic` became a product named "Automatic" x0; most columns were matched only by exact header text, so `processor qty` or a trailing space silently made a component random | `Automatic` = keep OCA's selection; every column matched ignoring case and spaces (CLI and dashboard upload share `ExcelReader`) |
 | 24 | Requirement from the project lead: a failed model or component must not end the run; try other options | Any model failure is retried from the start (`OCA_MODEL_ATTEMPTS`, default 3) except `ModelNotFoundError`; a closed/crashed browser is relaunched; an Excel product that fails is replaced by another option of its section (`Changed:` in Selected Components), else left to OCA; trace/HTML/result-writing failures never stop the batch |
 
-## 5. Current state (2026-10-14)
+## 5. Manual QA workflow (from the team's training video, 2026-10-14)
 
-- `main` is at `350e66c` and pushed.
+A 28-minute Teams recording: a GCPQ QA test engineer walks the project lead through OCA on ITG4 in
+aaS mode. The audio is mostly Tamil; the points below combine the screen and the speech. These are
+the checks the automation should eventually do.
+
+**Flow:** sign in → aaS → search model → Customize → configure (Menu, or Solution Wizard) → Services
+(experience level, term, data privacy) → BOM tab → Billing Tier Setup (check compute units, servers,
+cores) → Save → End BOM Setup: Auto-generate → set **Growth options** → Associate End BOM → Summary tab
+shows the End BOM UCID → record Start/End BOM UCIDs in the team's Excel tracker (columns: Solution
+type, Platform, Base models, Start BOM UCID, End BOM UCID, Comments).
+
+Model types demonstrated: single server (DL360 Gen12), Solution Wizard (HPE GreenLake for Private
+Cloud Business Edition with Alletra Storage MP, with a DL360 Gen12 inside), and **Synergy** (P51174-B21:
+Synergy 3 Frame Group → Master / Satellite frames → Synergy 480 Gen12 compute modules, each level
+opened through OCA's configuration dropdown). The tracker also lists ML350 Gen12 and Alletra dHCI
+(R0Q10A).
+
+**Checks the presenter explains:**
+1. **Growth factor:** End State Growth Factor is entered as a count (`#`, e.g. 4) or a percentage
+   (`%`, e.g. 300, 800). End BOM = Start BOM × factor: 3 servers → 12, 288 cores → 1152, compute units
+   654 → 2616; 800% gives 8 × 3 = 24. Close and reopen End BOM Setup: the values must be kept.
+2. **Compute unit = memory GB × 85% per server**, rounded: 512 GB → 435, 256 GB → 218 (× 3 servers =
+   654). Verified against the screenshots.
+3. **End BOM UCID appears on the Summary tab** (End BOM Type = Automatic, Start BOM Configuration = Yes).
+4. **Changing Services updates the End BOM** (term and experience level shown in End BOM Setup).
+5. **Negative test:** after editing a configuration with an End BOM associated, Save must be blocked
+   with an error message; after "Dissociate End BOM", Save is allowed.
+6. **Other regions:** one run used country Saudi Arabia instead of United States.
+7. **Synergy is important:** identical compute modules in different frames combine into one billing
+   tier; changing one module (e.g. memory 8 × 64 GB, a different network or Fibre Channel card) must
+   split it into its own billing tier.
+
+**Gaps (not automated yet):** growth factor (left at OCA's default), End BOM × factor check, compute
+unit check, Summary-tab End BOM check, Save-blocked negative test, region choice, Synergy multi-level
+configuration. Selectors for these need captured HTML first (CLAUDE.md): the Growth options table of
+End BOM Setup from two models; for Synergy, the configuration dropdown and a compute-module Menu page.
+
+## 6. Current state (2026-10-15)
+
+- `main` is at `629c830` (plus this document) and pushed.
 - Models seen so far: P72176-B21 and P72297-B21 (DL360-class) succeeded end to end before the later
   changes. P83540-B21 (DL580 Gen12) progressed through several repairs. P86628-B21 (DL110 Gen12)
   is waiting for a re-run with the M.2 fix.
 - The last known unit test run was 78/79 on `7444b8c`; the failure was fixed. **The typecheck and
-  unit tests haven't been run since**, so commits `31efdbd`, `390d459`, `143f9f9`, and `350e66c`
-  are untested.
+  unit tests haven't been run since**, so every commit from `31efdbd` to `629c830` is untested.
 - Most change-log rows still say "Pending" for the run result.
 
-## 6. To do next
+## 7. To do next
 
 0. Every log starts with `[INFO] Code version:`. Compare it with `git log -1` before diagnosing; ask for a re-run if it is older.
 1. On the run system: `git pull`, `npm run typecheck`, `npm run test:unit`. Fix anything that
@@ -133,8 +170,12 @@ Main code: `src/automation/component-engine.ts` (`ComponentEngine`),
 6. Make the **Solution Wizard** and **Storage** flows generic; they still use fixed choice ids.
    This needs captures from at least two models of each.
 7. Update the "Run result" column in the change log as runs are confirmed.
+8. Close the gaps in section 5, in this order (agreed with the user 2026-10-15): growth factor
+   (Excel column, e.g. `4` or `300%`) and End BOM = Start BOM × factor check; compute unit = memory
+   GB × 85% check; Summary-tab End BOM UCID check; then Synergy multi-level configuration. Ask for the
+   captured HTML before writing selectors.
 
-## 7. Commands (run system)
+## 8. Commands (run system)
 
 ```text
 npm run typecheck
