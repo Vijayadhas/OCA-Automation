@@ -57,3 +57,17 @@ test('fails before Save when OCA clears a Support Services choice', async ({ pag
   expect(error).toBeInstanceOf(MandatorySelectionError);
   expect(String(error)).toContain('Service experience is not selected');
 });
+
+// P72176-B21 (Nutanix, 2026-10-16): OCA preselects "HPE DDR4 DIMM Blank Kit" (P07818-B21) in the Memory
+// section's "Memory Blank Kit" choice. A blank kit is not memory and must never satisfy the check,
+// even when the Memory choice's rows are not counted (the choice is listed first by title otherwise).
+test('a DIMM Blank Kit never counts as the Memory selection', async ({ page }) => {
+  await page.setContent(menuSection({ key: 'mem', title: 'Memory', choices: [
+    { id: 'mem_blank', title: 'Memory Blank Kit', rows: [{ pid: 'P07818-B21', description: 'HPE DDR4 DIMM Blank Kit', quantity: 1, select: [0, 1] }] },
+    { id: 'mem_main', title: 'Memory', rows: [{ pid: 'P69728-F21', description: 'HPE 64GB (1x64GB) Dual Rank x4 DDR5-6400 Memory Kit', select: [0, 8, 16] }] },
+  ] }));
+  const engine = new ComponentEngine(page);
+  expect((await engine.mainChoice({ key: 'mem', title: 'Memory' }))?.id).toBe('mem_main');
+  expect(await engine.existingSelection('mem_blank')).toBeNull();
+  await expect(engine.mandatorySelection('Memory')).rejects.toThrow('Memory is mandatory, but nothing is selected');
+});

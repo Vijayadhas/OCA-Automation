@@ -211,14 +211,23 @@ export class QuantityHandler {
       let best: string[] = [];
       let bestDistance = Number.POSITIVE_INFINITY;
       for (const menu of Array.from(document.querySelectorAll('.popup-menu, .ui-menu, [role="listbox"], .selecter.open .selecter-options, .selecter-options'))) {
-        const rect = menu.getBoundingClientRect();
         const style = getComputedStyle(menu);
-        if (!rect.width || !rect.height || style.display === 'none' || style.visibility === 'hidden') continue;
-        const distance = Math.hypot(Math.max(rect.left - x, 0, x - rect.right), Math.max(rect.top - y, 0, y - rect.bottom));
+        if (style.display === 'none' || style.visibility === 'hidden') continue;
+        // OCA's #action_div measures 0x0 while its options show (P72176-B21, 2026-10-16): the menu's
+        // place is where its options are, not its own box.
+        const items = Array.from(menu.querySelectorAll('.menu-item, .ui-menu-item, [role="option"], .selecter-item')).filter((item) => {
+          const rect = item.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0 && getComputedStyle(item).visibility !== 'hidden';
+        });
+        if (!items.length) continue;
+        const rects = items.map((item) => item.getBoundingClientRect());
+        const left = Math.min(...rects.map((rect) => rect.left));
+        const right = Math.max(...rects.map((rect) => rect.right));
+        const top = Math.min(...rects.map((rect) => rect.top));
+        const bottom = Math.max(...rects.map((rect) => rect.bottom));
+        const distance = Math.hypot(Math.max(left - x, 0, x - right), Math.max(top - y, 0, y - bottom));
         if (distance > near || distance >= bestDistance) continue;
-        const texts = Array.from(menu.querySelectorAll('.menu-item, .ui-menu-item, [role="option"], .selecter-item'))
-          .filter((item) => item.getClientRects().length > 0)
-          .map((item) => (item.textContent ?? '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+        const texts = items.map((item) => (item.textContent ?? '').replace(/\s+/g, ' ').trim()).filter(Boolean);
         if (!texts.length) continue;
         best = texts;
         bestDistance = distance;
@@ -252,11 +261,12 @@ export class QuantityHandler {
       `[id="${value}"]`,
       `.selecter.open .selecter-options .selecter-item[data-value="${value}"]`,
       `.selecter.open .selecter-item[data-value="${value}"]`,
-      `.selecter-options:visible .selecter-item[data-value="${value}"]`,
-      `[role="listbox"]:visible [role="option"][data-value="${value}"]`,
-      `[role="listbox"]:visible [role="option"]`,
-      `.ui-menu:visible .ui-menu-item`,
-      `.popup-menu:visible .menu-item`,
+      // Containers are not required to be visible: OCA's popup-menu box is 0x0 while its options show.
+      `.selecter-options .selecter-item[data-value="${value}"]`,
+      `[role="listbox"] [role="option"][data-value="${value}"]`,
+      `[role="listbox"] [role="option"]`,
+      `.ui-menu .ui-menu-item`,
+      `.popup-menu .menu-item`,
     ].join(', ')).filter({ visible: true, hasText: exact });
     await expect.poll(() => options.count(), { timeout: 5_000, message: `Visible quantity option ${value}` }).toBeGreaterThan(0);
 

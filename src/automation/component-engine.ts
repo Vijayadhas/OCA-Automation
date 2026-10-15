@@ -86,6 +86,11 @@ export function mentionsProduct(text: string, productNumber: string): boolean {
 }
 
 /** Blank and filler kits are never chosen at random. */
+/** A memory slot filler: "HPE DDR4 DIMM Blank Kit" (P07818-B21), choice "Memory Blank Kit". Not memory. */
+export function isDimmBlank(text: string): boolean {
+  return /\b(?:DIMM|memory)\s+blank\b/i.test(text);
+}
+
 export function isMemoryBlankProduct(description: string): boolean {
   return /\b(?:memory\s+)?blank(?:\s+kit)?\b/i.test(description);
 }
@@ -277,7 +282,9 @@ export class ComponentEngine {
    * (Smart Chassis: "Top Selling Smart Chassis Combinations").
    */
   async mainChoice(section: MenuSection): Promise<MenuChoice | null> {
-    const withRows = (await this.choices(section)).filter((choice) => choice.rows > 0);
+    // "Memory Blank Kit" (P07818-B21, preselected by OCA) is never the Memory choice: a blank kit
+    // fills empty slots and is not memory.
+    const withRows = (await this.choices(section)).filter((choice) => choice.rows > 0 && !isDimmBlank(choice.title));
     const named = withRows.find((choice) => choice.id === section.choiceId);
     if (named) return named;
     const title = normalize(section.title);
@@ -434,7 +441,8 @@ export class ComponentEngine {
   /** The product already selected in a choice, if any, with its row id. */
   async existingSelection(choiceId: string): Promise<(Selection & { rowId: string }) | null> {
     const rows = await this.rowInfo(this.choiceRows(choiceId).filter({ visible: true }));
-    const selected = rows.find((row) => row.productNumber && this.committedQuantity(row) > 0);
+    // A blank kit never counts as a selection (it is not memory).
+    const selected = rows.find((row) => row.productNumber && this.committedQuantity(row) > 0 && !isDimmBlank(row.description));
     return selected
       ? { productNumber: selected.productNumber, description: selected.description, quantity: this.committedQuantity(selected), rowId: selected.id }
       : null;

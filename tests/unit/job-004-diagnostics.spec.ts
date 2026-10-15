@@ -128,3 +128,25 @@ test('waits for the slow menu beside the row and ignores menus left at the top-l
   await expect(page.locator('.item_qty_div')).toHaveText('8');
   expect(await page.evaluate(() => document.body.dataset.stale)).toBeUndefined();
 });
+
+// P72176-B21 (Nutanix, 2026-10-16), from the run's menu diagnostics: "#action_div at x 1225, y 782, 0x0
+// block/visible/1: 0 8 16 24 32". OCA's menu box measures 0x0 while its options show, so menus were
+// skipped as invisible. The menu's place is taken from its options.
+test('reads a quantity menu whose own box is 0x0 while its options show', async ({ page }) => {
+  await page.setContent(`
+    <table style="position: absolute; top: 500px; left: 700px"><tr class="item_tr" id="item_tr_P69729-F21_memory_memorySlotsChoice">
+      <td><span class="_pid">P69729-F21</span></td>
+      <td class="item_qty"><div class="item_qty_div" onclick="document.getElementById('action_div').style.display = 'block'">0</div></td>
+    </tr></table>
+    <div id="action_div" class="popup-menu" style="position: absolute; top: 520px; left: 820px; width: 0; height: 0; display: none">
+      <ul id="action_ul" class="popup-menu-body compact" style="position: absolute; top: 0; left: 0; margin: 0; padding: 0; width: 56px; list-style: none">
+      ${[0, 8, 16, 24, 32].map((value) => `<li class="menu-item compact"
+        onclick="document.querySelector('.item_qty_div').textContent = '${value}'; document.getElementById('action_div').style.display = 'none'">
+        <a id="${value}" name="${value}">${value}</a></li>`).join('')}</ul></div>`);
+  expect(await page.locator('#action_div').evaluate((menu) => {
+    menu.style.display = 'block'; const { width, height } = menu.getBoundingClientRect(); menu.style.display = 'none'; return width + height;
+  })).toBe(0);
+  const quantity = await new QuantityHandler(page).set(page.locator('tr.item_tr'), 'P69729-F21', 2, false, { acceptOffered: true });
+  expect(quantity).toBe(8);
+  await expect(page.locator('.item_qty_div')).toHaveText('8');
+});
