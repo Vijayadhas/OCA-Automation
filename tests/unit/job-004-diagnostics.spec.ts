@@ -107,3 +107,24 @@ test('takes an offered quantity from a menu that closes before 1 would be found'
   await expect(page.locator('.item_qty_div')).toHaveText('2');
   expect(Date.now() - started).toBeLessThan(15_000);
 });
+
+// P72176-B21 (Nutanix, 2026-10-16): OCA was recalculating (loading overlays of 10-20 s) and opened the
+// memory menu (0/8/16/24/32) seconds after the click, beside the row, while eight copies of earlier
+// menus stayed displayed at the page's top-left corner. Each candidate gave up as "did not open".
+test('waits for the slow menu beside the row and ignores menus left at the top-left corner', async ({ page }) => {
+  const menu = (id: string, style: string, onclick: (value: number) => string) => `
+    <div id="${id}" class="popup-menu" style="position: absolute; ${style}"><ul class="popup-menu-body compact">${[0, 8, 16, 24, 32]
+    .map((value) => `<li class="menu-item compact" onclick="${onclick(value)}"><a id="${value}" name="${value}">${value}</a></li>`).join('')}</ul></div>`;
+  await page.setContent(`
+    ${menu('stale', 'top: 0px; left: -10px;', () => "document.body.dataset.stale = 'clicked'")}
+    <table style="position: absolute; top: 500px; left: 700px"><tr class="item_tr" id="item_tr_P69728-F21_memory_memorySlotsChoice">
+      <td><span class="_pid">P69728-F21</span></td>
+      <td class="item_qty"><div class="item_qty_div" onclick="setTimeout(() => { document.getElementById('action_div').style.display = 'block'; }, 7000)">0</div></td>
+    </tr></table>
+    ${menu('action_div', 'top: 520px; left: 820px; display: none', (value) =>
+    `document.querySelector('.item_qty_div').textContent = '${value}'; document.getElementById('action_div').style.display = 'none'`)}`);
+  const quantity = await new QuantityHandler(page).set(page.locator('tr.item_tr'), 'P69728-F21', 1, false, { acceptOffered: true });
+  expect(quantity).toBe(8);
+  await expect(page.locator('.item_qty_div')).toHaveText('8');
+  expect(await page.evaluate(() => document.body.dataset.stale)).toBeUndefined();
+});

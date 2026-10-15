@@ -49,8 +49,10 @@ export class CustomerAccount {
     await this.choose(wanted);
     await expect.poll(() => this.current(), { timeout: 15_000, message: `Customer Account ${wanted || '(none)'}` })
       .toBe(wanted ? await this.accountName(wanted) : '');
+    // Read before closing: the field is not read reliably once Advanced Settings is closed.
+    const chosen = await this.current();
     await this.close();
-    console.log(`[INFO] Customer Account: ${await this.current() || 'none'}`);
+    console.log(`[INFO] Customer Account: ${chosen || 'none'}`);
   }
 
   private async openAdvancedSettings(): Promise<void> {

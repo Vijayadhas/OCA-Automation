@@ -3,6 +3,11 @@ import { escapeRegex, waitForBlockingOverlay } from '../core/waits';
 import type { PageSnapshot } from '../reporting/html-capture';
 import { revealForViewer } from '../core/interactions';
 
+/** How long a quantity menu may take to open after the click (OCA can be busy recalculating). */
+const MENU_OPEN_TIMEOUT_MS = 15_000;
+/** How far (px) an open menu may be from the clicked quantity control to be its menu. */
+const MENU_NEAR_PX = 300;
+
 export class QuantityHandler {
   constructor(private readonly page: Page, private readonly snapshot?: PageSnapshot) {}
 
@@ -143,19 +148,22 @@ export class QuantityHandler {
       if (attempt === 2) {
         await attemptTarget.evaluate((element) => (element as HTMLElement).click()).catch(() => undefined);
       }
-      await this.page.waitForTimeout(700);
-
+      // OCA can open the menu seconds after the click while it recalculates (S3V83A's DL380 Gen12 and
+      // P72176-B21 Nutanix: loading overlays of 10-20 s). Wait for the menu next to this row, or the popup
+      // textbox; menus OCA left behind at the page's top-left corner do not count.
       const popupTextBox = this.page.locator('#popup_textbox').filter({ visible: true }).first();
-      if (await popupTextBox.isVisible({ timeout: 1_000 }).catch(() => false)) {
+      let opened = '';
+      await expect.poll(async () => {
+        if (await popupTextBox.isVisible().catch(() => false)) return (opened = 'textbox');
+        offered = await this.menuNear(attemptTarget);
+        return (opened = offered.length ? 'menu' : '');
+      }, { timeout: MENU_OPEN_TIMEOUT_MS, intervals: [250, 500] }).not.toBe('').catch(() => undefined);
+      if (opened === 'textbox') {
         console.log(`[INFO] Entering quantity ${value} through OCA quantity popup textbox`);
         await popupTextBox.fill(value);
         await popupTextBox.press('Enter');
         return quantity;
       }
-      // Read what the menu offers as soon as it opens: waiting first for an exact value that OCA does
-      // not offer let the menu go before it was read (S3V83A's DL380 Gen12 memory offered only
-      // 0/2/4/8/16/24/32, and a request for 1 failed three times per product as "visible options: none").
-      offered = await this.offeredOptions();
       // DL320 Gen12 network cards: the menu opened offering only "0"; OCA does not allow this product here.
       if (offered.length && offered.every((text) => /^0$/.test(text))) {
         await this.page.keyboard.press('Escape').catch(() => undefined);
@@ -163,6 +171,7 @@ export class QuantityHandler {
       }
       let chosen = quantity;
       if (offered.length && !offered.includes(value)) {
+        // S3V83A's DL380 Gen12 memory offered 0/2/4/8/…; P72176-B21 (Nutanix) memory 0/8/16/24/32.
         const fallback = acceptOffered ? this.smallestOffered(offered) : undefined;
         if (fallback === undefined) {
           await this.page.keyboard.press('Escape').catch(() => undefined);
@@ -170,22 +179,16 @@ export class QuantityHandler {
         }
         chosen = fallback;
       }
-      let menuOption = await this.findNearestOpenOption(attemptTarget, String(chosen)).catch(() => null);
-      if (!menuOption && !offered.length && acceptOffered) {
-        // A menu that opened slowly: read it again after the wait.
-        const fallback = this.smallestOffered(offered = await this.offeredOptions());
-        if (fallback !== undefined) {
-          menuOption = await this.findNearestOpenOption(attemptTarget, String(fallback)).catch(() => null);
-          chosen = fallback;
-        }
-      }
+      const menuOption = offered.length ? await this.findNearestOpenOption(attemptTarget, String(chosen)).catch(() => null) : null;
       if (menuOption) {
         const optionBox = await menuOption.boundingBox();
         if (optionBox) await this.page.mouse.click(optionBox.x + optionBox.width / 2, optionBox.y + optionBox.height / 2);
         else await menuOption.click({ force: true });
         return chosen;
       }
-      console.log(`[WARN] Quantity option ${value} did not open on attempt ${attempt}/3; retrying`);
+      console.log(`[WARN] Quantity option ${value} did not open on attempt ${attempt}/3 (menu next to the row: ${offered.length ? offered.join(', ') : 'none'}); retrying`);
+      // What the page showed, for the log: every open menu, where it is, and what it offers.
+      if (!offered.length) console.log(`[INFO] Quantity control at ${await this.describeBox(attemptTarget)}; menus on the page: ${await this.describeMenus()}`);
       // Keep the page as the last click left it, before Escape closes anything that did open.
       if (attempt === 3) await this.snapshot?.(`WARN-Quantity ${value} did not open for ${productNumber}`);
       await this.page.keyboard.press('Escape').catch(() => undefined);
@@ -195,16 +198,52 @@ export class QuantityHandler {
       + ` (visible options: ${offered.length ? offered.join(', ') : 'none'})`);
   }
 
-  /** Texts of the quantity options now shown in an open menu or list. */
-  private async offeredOptions(): Promise<string[]> {
-    return (await this.page.locator([
-      '.selecter.open .selecter-item', '.selecter-options:visible .selecter-item',
-      '[role="listbox"]:visible [role="option"]', '.ui-menu:visible .ui-menu-item',
-      // OCA's quantity popup: <div id="action_div" class="popup-menu"><li class="menu-item"><a id="2">2</a>.
-      // OCA leaves stale copies of it behind with the same options.
-      '.popup-menu:visible .menu-item',
-    ].join(', ')).filter({ visible: true }).allTextContents().catch(() => [] as string[]))
-      .map((text) => text.replace(/\s+/g, ' ').trim()).filter((text, index, all) => text && all.indexOf(text) === index);
+  /**
+   * Option texts of the open quantity menu nearest the clicked control, or [] when none is open
+   * near it. OCA leaves earlier menus displayed at the page's top-left corner with the same
+   * options, so only a menu within MENU_NEAR_PX of the control counts.
+   */
+  private async menuNear(target: Locator): Promise<string[]> {
+    const box = await target.boundingBox().catch(() => null);
+    if (!box) return [];
+    // Inline code only: tsx would wrap a named helper in __name(), which the page lacks.
+    return this.page.evaluate(({ x, y, near }) => {
+      let best: string[] = [];
+      let bestDistance = Number.POSITIVE_INFINITY;
+      for (const menu of Array.from(document.querySelectorAll('.popup-menu, .ui-menu, [role="listbox"], .selecter.open .selecter-options, .selecter-options'))) {
+        const rect = menu.getBoundingClientRect();
+        const style = getComputedStyle(menu);
+        if (!rect.width || !rect.height || style.display === 'none' || style.visibility === 'hidden') continue;
+        const distance = Math.hypot(Math.max(rect.left - x, 0, x - rect.right), Math.max(rect.top - y, 0, y - rect.bottom));
+        if (distance > near || distance >= bestDistance) continue;
+        const texts = Array.from(menu.querySelectorAll('.menu-item, .ui-menu-item, [role="option"], .selecter-item'))
+          .filter((item) => item.getClientRects().length > 0)
+          .map((item) => (item.textContent ?? '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+        if (!texts.length) continue;
+        best = texts;
+        bestDistance = distance;
+      }
+      return best;
+    }, { x: box.x + box.width / 2, y: box.y + box.height / 2, near: MENU_NEAR_PX });
+  }
+
+  private async describeBox(target: Locator): Promise<string> {
+    const box = await target.boundingBox().catch(() => null);
+    return box ? `x ${Math.round(box.x)}, y ${Math.round(box.y)}, ${Math.round(box.width)}x${Math.round(box.height)}` : 'no box';
+  }
+
+  /** Every menu or list on the page with its position, display state and options (for diagnosis). */
+  private async describeMenus(): Promise<string> {
+    const menus = await this.page.evaluate(() => Array.from(document.querySelectorAll('.popup-menu, .ui-menu, [role="listbox"], .selecter-options'))
+      .map((menu) => {
+        const rect = menu.getBoundingClientRect();
+        const style = getComputedStyle(menu);
+        const items = Array.from(menu.querySelectorAll('.menu-item, .ui-menu-item, [role="option"], .selecter-item'))
+          .map((item) => (item.textContent ?? '').replace(/\s+/g, ' ').trim()).filter(Boolean).slice(0, 8);
+        return `${menu.id ? `#${menu.id}` : menu.className.toString().split(' ')[0]} at x ${Math.round(rect.left)}, y ${Math.round(rect.top)}, `
+          + `${Math.round(rect.width)}x${Math.round(rect.height)} ${style.display}/${style.visibility}/${style.opacity}: ${items.join(' ')}`;
+      })).catch((error: unknown) => [`unreadable (${String(error).split('\n')[0]})`]);
+    return menus.length ? menus.slice(-6).join(' | ') : 'none';
   }
 
   private async findNearestOpenOption(target: Locator, value: string): Promise<Locator | null> {
@@ -234,7 +273,8 @@ export class QuantityHandler {
         box.x + box.width / 2 - (targetBox.x + targetBox.width / 2),
         box.y + box.height / 2 - (targetBox.y + targetBox.height / 2),
       );
-      if (distance < nearestDistance) {
+      // A copy OCA left at the page's top-left corner is not this row's menu.
+      if (distance < nearestDistance && distance <= MENU_NEAR_PX + Math.max(box.width, box.height) * 4) {
         nearest = candidate;
         nearestDistance = distance;
       }
