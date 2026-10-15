@@ -30,6 +30,7 @@ const instructions: Array<[string, string, string]> = [
   ['Solution Name', 'Optional', 'Solution models: the solution to pick in the Solution Wizard.'],
   ['Generate End BOM', 'Yes / No', 'Default Yes.'],
   ['Enabled', 'Yes / No', 'Default Yes. No: the row is skipped.'],
+  ['Notes', 'Optional', 'Free text for the team; not read by the tool.'],
   ['Components sheet', '', 'Optional. A model with no rows here gets random Processor, Memory, Smart Chassis and '
     + 'Power Supplies. Processor and Memory are always mandatory.'],
   ['Section', 'Required per row', 'OCA Menu section title, e.g. Processor, Memory, Power Supplies.'],
@@ -40,26 +41,35 @@ const instructions: Array<[string, string, string]> = [
   ['Sequence', 'Optional', 'Order of the rows within a model (10, 20, 30...).'],
 ];
 
-/** The input workbook to fill in: Models and Components sheets with examples, and an Instructions sheet. */
+/** The input workbook: the models run so far on the Models sheet, an empty Components sheet, and Instructions. */
 export function buildInputTemplate(): XLSX.WorkBook {
+  // Models already run against OCA, with what the last run showed (Notes is not read by the tool).
+  const model = (jobId: string, modelNumber: string, modelType: string, notes: string) =>
+    [jobId, modelNumber, modelType, '', '', 'Random', '', '', '', 'Yes', 'Yes', notes];
   const models = [
-    ['JOB-001', 'P75399-B21', 'Server', '', '', 'Random', '', '', '', 'Yes', 'Yes'],
-    ['JOB-002', 'P72176-B21', 'Nutanix', '', '', 'Random', '', '', '', 'Yes', 'Yes'],
-    ['JOB-003', 'S3V83A', 'Solution', '', '', 'Random', '', '', '', 'Yes', 'Yes'],
-    ['JOB-004', 'S2U63A', 'Storage', '', '', 'Random', '', '', '', 'Yes', 'Yes'],
+    model('JOB-001', 'P72176-B21', 'Server', 'DL360 Gen12. Passed end to end.'),
+    model('JOB-002', 'P72297-B21', 'Server', 'DL360-class. Passed end to end.'),
+    model('JOB-003', 'P75219-B21', 'Server', 'DL320 Gen12. Passed end to end.'),
+    model('JOB-004', 'P75220-B21', 'Server', 'DL320 Gen12. Passed end to end.'),
+    model('JOB-005', 'P75217-B21', 'Server', 'DL320 Gen12. Failed on a boot device rule; repair added, retest.'),
+    model('JOB-006', 'P75218-B21', 'Server', 'DL320 Gen12. Failed on an OCP/processor rule; repair added, retest.'),
+    model('JOB-007', 'P86628-B21', 'Server', 'DL110 Gen12. Failed on the M.2 rule; fixed, retest.'),
+    model('JOB-008', 'P83540-B21', 'Server', 'DL580 Gen12. Failed on Smart Chassis (old build); fixed, retest.'),
+    model('JOB-009', 'P75399-B21', 'Server', 'DL580 Gen12 SFF. Failed on non-mandatory red icons; now only Processor/Memory block, retest.'),
+    model('JOB-010', 'P72176-B21', 'Nutanix', 'Nutanix DL360 G12. Failed in Customer Account; fixed, retest.'),
+    model('JOB-011', 'S3V83A', 'Solution', 'dHCI solution. Wizard and Menu passed; server inside the solution added, retest.'),
+    model('JOB-012', 'S2U63A', 'Server', 'DL380 Gen11 Data Solutions. Stopped at Billing Tier; capacity entry added, retest.'),
   ];
-  const components = [
-    ['JOB-001', 'Processor', '', '', 'random', '', 10],
-    ['JOB-001', 'Memory', '', '', 'random', '', 20],
-  ];
+  // No component rows: every model gets random Processor, Memory, Smart Chassis and Power Supplies.
+  const components: unknown[][] = [];
   const workbook = XLSX.utils.book_new();
   const sheet = (rows: unknown[][], widths: number[]) => {
     const worksheet = XLSX.utils.aoa_to_sheet(rows);
     worksheet['!cols'] = widths.map((wch) => ({ wch }));
     return worksheet;
   };
-  XLSX.utils.book_append_sheet(workbook, sheet([[...TEMPLATE_MODEL_COLUMNS], ...models],
-    [10, 14, 12, 26, 20, 13, 18, 26, 22, 16, 9]), 'Models');
+  XLSX.utils.book_append_sheet(workbook, sheet([[...TEMPLATE_MODEL_COLUMNS, 'Notes'], ...models],
+    [10, 14, 12, 26, 20, 13, 18, 26, 22, 16, 9, 90]), 'Models');
   XLSX.utils.book_append_sheet(workbook, sheet([[...TEMPLATE_COMPONENT_COLUMNS], ...components],
     [10, 18, 16, 9, 15, 22, 9]), 'Components');
   XLSX.utils.book_append_sheet(workbook, sheet([['Column', 'Values', 'Meaning'], ...instructions], [28, 34, 110]), 'Instructions');

@@ -55,7 +55,7 @@ model without an account clears it before its search.
 
 ### Input template
 
-`npm run template:excel` writes `input/OCA-Input-Template.xlsx`; the dashboard's **Download Excel
+`npm run template:excel` writes `input/OCA-Input-Template.xlsx`, prefilled with the models run so far (a `Notes` column gives each one's last result; the tool ignores it). The dashboard's **Download Excel
 template** button gives the same file. Its `Models` sheet has every field of the Add model dialog,
 `Components` holds optional component rows, and `Instructions` explains each column. A model with no
 `Components` rows gets random Processor, Memory, Smart Chassis and Power Supplies, as in the dashboard.

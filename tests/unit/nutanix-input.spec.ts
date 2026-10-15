@@ -27,18 +27,20 @@ test('the input template has every dialog field and reads back as runnable jobs'
   XLSX.writeFile(buildInputTemplate(), file);
   const workbook = XLSX.readFile(file);
   expect(workbook.SheetNames).toEqual(['Models', 'Components', 'Instructions']);
-  expect(XLSX.utils.sheet_to_json<string[]>(workbook.Sheets.Models, { header: 1 })[0]).toEqual([...TEMPLATE_MODEL_COLUMNS]);
+  expect(XLSX.utils.sheet_to_json<string[]>(workbook.Sheets.Models, { header: 1 })[0]).toEqual([...TEMPLATE_MODEL_COLUMNS, 'Notes']);
 
   const jobs = new ExcelReader().read(file);
-  expect(jobs.map((job) => [job.jobId, job.modelType, job.isSolution, job.isStorage])).toEqual([
-    ['JOB-001', 'Server', false, false], ['JOB-002', 'Nutanix', false, false],
-    ['JOB-003', 'Solution', true, false], ['JOB-004', 'Storage', false, true],
-  ]);
+  expect(jobs).toHaveLength(12);
+  expect(new Set(jobs.map((job) => job.jobId)).size).toBe(12);
+  const byId = (jobId: string) => jobs.find((job) => job.jobId === jobId)!;
+  expect([byId('JOB-010').modelNumber, byId('JOB-010').modelType, byId('JOB-010').isSolution]).toEqual(['P72176-B21', 'Nutanix', false]);
+  expect([byId('JOB-011').modelNumber, byId('JOB-011').isSolution]).toEqual(['S3V83A', true]);
+  // Notes are for the team; they never become a search description.
+  expect(jobs.every((job) => job.modelDescription === undefined)).toBe(true);
   const sections = (index: number) => {
     const source = jobs[index].source;
     return source.kind === 'detailed-excel' ? source.instructions.map((item) => item.section) : [];
   };
-  expect(sections(0)).toEqual(['Processor', 'Memory']);
   // No Components rows: random Processor, Memory, Smart Chassis and Power Supplies, as in the dashboard.
   expect(sections(1)).toEqual(['Processor', 'Memory', 'Smart Chassis', 'Power Supplies']);
 });

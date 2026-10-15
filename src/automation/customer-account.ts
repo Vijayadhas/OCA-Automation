@@ -50,7 +50,7 @@ export class CustomerAccount {
     await expect.poll(() => this.current(), { timeout: 15_000, message: `Customer Account ${wanted || '(none)'}` })
       .toBe(wanted ? await this.accountName(wanted) : '');
     await this.close();
-    console.log(`[INFO] Customer Account: ${wanted || 'none'}`);
+    console.log(`[INFO] Customer Account: ${await this.current() || 'none'}`);
   }
 
   private async openAdvancedSettings(): Promise<void> {
@@ -76,38 +76,51 @@ export class CustomerAccount {
     }, wanted);
   }
 
-  /** Picks the account in OCA's searchable dropdown, as a user does; the native select is the fallback. */
+  /**
+   * Picks the account in OCA's searchable dropdown, as a user does. On a fresh page the list holds only
+   * "Key in value / Select from list" (P72176-B21 run, 2026-10-16): OCA loads accounts as the name is
+   * typed into "Type to search...". Setting OCA's own select is the fallback.
+   */
   private async choose(wanted: string): Promise<void> {
     const dropdown = this.select().locator('xpath=following-sibling::div[contains(concat(" ", normalize-space(@class), " "), " selecter ")][1]');
-    const known = await this.select().evaluate((select, name) => {
-      const options = Array.from((select as HTMLSelectElement).options);
-      const text = (item: HTMLOptionElement) => (item.getAttribute('account-name') ?? item.textContent ?? '').replace(/\s+/g, ' ').trim();
-      return name ? options.some((item) => text(item).toLowerCase() === name.toLowerCase()) : true;
-    }, wanted);
-    if (!known) throw new Error(`Customer Account "${wanted}" is not in OCA's Customer Account list`);
-
     await safeClick(dropdown.locator('.selecter-selected').first());
-    const typeToSearch = this.page.getByRole('textbox', { name: 'Type to search...' }).filter({ visible: true }).first();
-    if (wanted && await typeToSearch.isVisible({ timeout: 2_000 }).catch(() => false)) await typeToSearch.fill(wanted);
-    const item = wanted
-      ? dropdown.locator('.selecter-item').filter({ hasText: new RegExp(`^\\s*${escapeRegex(wanted)}\\s*$`, 'i') }).first()
-      : dropdown.locator('.selecter-item').first();
-    if (await item.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    if (wanted) {
+      const typeToSearch = this.page.getByRole('textbox', { name: 'Type to search...' }).filter({ visible: true }).first();
+      if (await typeToSearch.isVisible({ timeout: 10_000 }).catch(() => false)) await typeToSearch.fill(wanted);
+      else console.log('[WARN] "Type to search..." did not appear in Customer Account; looking for the account in the list');
+    }
+    const exact = new RegExp(`^\\s*${escapeRegex(wanted)}\\s*$`, 'i');
+    const listed = wanted
+      ? dropdown.locator('.selecter-item').filter({ visible: true, hasText: exact }).first()
+      : dropdown.locator('.selecter-item').filter({ visible: true }).first();
+    // The search can list matches outside the selecter; the landing page's recent-configuration
+    // table also shows account names, so table cells do not count.
+    const shown = this.page.getByText(exact).and(this.page.locator(':not(table *):not(select *)')).filter({ visible: true }).first();
+    let item: Locator | undefined;
+    await expect.poll(async () => {
+      if (await listed.isVisible().catch(() => false)) item = listed;
+      else if (wanted && await shown.isVisible().catch(() => false)) item = shown;
+      return Boolean(item);
+    }, { timeout: 30_000, intervals: [500] }).toBe(true).catch(() => undefined);
+    if (item) {
       await safeClick(item);
     } else {
       // The list did not show the item: set OCA's own select and announce the change as the dropdown does.
       console.log(`[WARN] Customer Account list did not show ${wanted || 'the default entry'}; setting the field directly`);
-      await this.select().evaluate((select, name) => {
+      const set = await this.select().evaluate((select, name) => {
         const element = select as HTMLSelectElement;
-        const text = (item: HTMLOptionElement) => (item.getAttribute('account-name') ?? item.textContent ?? '').replace(/\s+/g, ' ').trim();
-        const option = Array.from(element.options).find((item) => (name
-          ? text(item).toLowerCase() === name.toLowerCase() : item.hasAttribute('default') || !item.value));
-        if (!option) return;
+        // No named helper functions in browser code: tsx wraps them in __name(), which the page lacks.
+        const option = Array.from(element.options).find((entry) => (name
+          ? (entry.getAttribute('account-name') ?? entry.textContent ?? '').replace(/\s+/g, ' ').trim().toLowerCase() === name.toLowerCase()
+          : entry.hasAttribute('default') || !entry.value));
+        if (!option) return false;
         element.value = option.value;
         option.selected = true;
         const jquery = (window as unknown as { jQuery?: (target: Element) => { trigger: (event: string) => void } }).jQuery;
         if (jquery) jquery(element).trigger('change'); else element.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
       }, wanted);
+      if (!set) throw new Error(`Customer Account "${wanted}" was not found in OCA's Customer Account list`);
     }
     await waitForBlockingOverlay(this.page);
   }
