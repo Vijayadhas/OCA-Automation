@@ -24,6 +24,8 @@ type RunState = {
   startedAt: string;
   finishedAt?: string;
   resultPath?: string;
+  /** Every line of the run with its time (the dashboard keeps only the latest lines). */
+  logPath?: string;
   logs: string[];
   process?: ChildProcess;
   clients: Set<express.Response>;
@@ -35,6 +37,9 @@ const root = path.resolve(__dirname, '../..');
 const dataRoot = path.join(root, '.oca-ui', 'runs');
 const publicRoot = path.join(root, 'src', 'ui', 'public');
 const runs = new Map<string, RunState>();
+/** Local time of day, HH:MM:SS, put in front of each Activity log line. */
+const logTime = (date = new Date()) => [date.getHours(), date.getMinutes(), date.getSeconds()]
+  .map((part) => String(part).padStart(2, '0')).join(':');
 fs.mkdirSync(dataRoot, { recursive: true });
 
 app.use(express.json({ limit: '5mb' }));
@@ -123,9 +128,18 @@ app.post('/api/runs', (req, res) => {
   res.status(202).json({ id });
   // Known from the start, so the results table fills as each model is written, not only at the end.
   run.resultPath = path.join(outputDir, 'input-results.xlsx');
-  run.process = child; run.status = 'running'; run.message = 'Opening browser session'; publish(run);
+  run.process = child; run.status = 'running'; run.message = 'Opening browser session';
+  // The whole log is kept beside the run's input and output, so a zip of the run folder carries it.
+  run.logPath = path.join(runDir, 'activity.log');
+  const record = (line: string) => {
+    const stamped = `${logTime()} ${line}`;
+    run.logs.push(stamped); if (run.logs.length > 250) run.logs.shift();
+    try { fs.appendFileSync(run.logPath!, `${stamped}\n`, 'utf8'); } catch { /* the dashboard still shows the line */ }
+  };
+  record(`[RUN] ${id} started ${new Date().toLocaleString()} with ${jobs.length} model(s): ${jobs.map((job) => `${job.jobId} ${job.modelNumber}${job.modelType ? ` (${job.modelType})` : ''}`).join(', ')}`);
+  publish(run);
   const handleLine = (line: string) => {
-    run.logs.push(line); if (run.logs.length > 250) run.logs.shift();
+    record(line);
     const started = line.match(/^\[(\d+)\/(\d+)] (.+?) - Running$/);
     const ended = line.match(/^\[(\d+)\/(\d+)] (.+?) - (Success|Failed|Unsupported|Skipped)(?:\s-\s(.*))?$/);
     if (started) {
@@ -172,6 +186,13 @@ app.post('/api/runs', (req, res) => {
 app.get('/api/runs/:id', (req, res) => {
   const run = runs.get(req.params.id); if (!run) return res.status(404).json({ error: 'Run not found.' });
   return res.json(serializable(run));
+});
+
+/** The whole Activity log of a run, every line with its time (the dashboard shows the latest 250). */
+app.get('/api/runs/:id/log', (req, res) => {
+  const run = runs.get(req.params.id); if (!run) return res.status(404).type('text/plain').send('Run not found.');
+  const text = run.logPath && fs.existsSync(run.logPath) ? fs.readFileSync(run.logPath, 'utf8') : `${run.logs.join('\n')}\n`;
+  return res.type('text/plain').send(text);
 });
 
 app.get('/api/runs/:id/events', (req, res) => {

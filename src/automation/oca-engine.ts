@@ -100,7 +100,8 @@ export class OcaEngine {
     // start again from the Excel rows, not from the previous attempt's picks.
     const instructions = job.source.instructions.map((instruction) => ({ ...instruction }));
     const useSolutionWizard = await this.shouldUseSolutionWizard(job);
-    if (job.isStorage) {
+    const useStorageFlow = job.isStorage && await this.shouldUseStorageFlow(job);
+    if (useStorageFlow) {
       this.currentStep = 'Configure Storage model';
       const selections = await this.measure('Configure Storage model', () => new StorageFlow(this.activePage).configure());
       result.selectedComponents = selections.map((item) =>
@@ -122,9 +123,9 @@ export class OcaEngine {
 
     this.currentStep = 'Resolve required configuration errors';
     // Storage has no Processor or Memory; its required sections (Capacity) are all repaired.
-    this.resolveOptions = job.isStorage ? {} : MANDATORY_ONLY;
+    this.resolveOptions = useStorageFlow ? {} : MANDATORY_ONLY;
     await this.measure('Resolve required configuration errors', () => resolveConfigurationErrors(this.activePage, this.components, this.resolveOptions));
-    if (!job.isStorage && !useSolutionWizard) {
+    if (!useStorageFlow && !useSolutionWizard) {
       // Processor and Memory are mandatory: without them the configuration is not saved and no End BOM is made.
       this.currentStep = 'Check mandatory Processor and Memory';
       for (const section of MANDATORY_SECTIONS) await this.components.mandatorySelection(section);
@@ -268,6 +269,20 @@ export class OcaEngine {
         : '[INFO] Model Type is blank and OCA opened a Solution Wizard-only workspace; using Solution Wizard');
       return true;
     }
+    return false;
+  }
+
+  /**
+   * A Storage model's Menu starts with Cloud Connectivity. S2U63A (DL380 Gen11 Data Solutions) was entered
+   * as Storage but OCA opened a server Menu (Processors, Memory Kits, Storage, …) with no Cloud
+   * Connectivity, so the storage flow failed after 30 s. Such a model takes the Server route instead.
+   */
+  private async shouldUseStorageFlow(job: OcaJob): Promise<boolean> {
+    const cloudConnectivity = this.activePage.getByText(/Cloud Connectivity/i).filter({ visible: true }).first();
+    if (await cloudConnectivity.isVisible({ timeout: 10_000 }).catch(() => false)) return true;
+    if (!await this.components.findSection('Processor').catch(() => null)) return true;
+    console.log(`[WARN] Model Type is Storage, but OCA opened a server Menu for ${job.modelNumber} (Processor section, no Cloud Connectivity); `
+      + 'using the Server route (set Model Type to Server)');
     return false;
   }
 

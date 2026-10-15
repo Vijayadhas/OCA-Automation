@@ -152,23 +152,28 @@ export class QuantityHandler {
         await popupTextBox.press('Enter');
         return quantity;
       }
-      let menuOption = await this.findNearestOpenOption(attemptTarget, value).catch(() => null);
+      // Read what the menu offers as soon as it opens: waiting first for an exact value that OCA does
+      // not offer let the menu go before it was read (S3V83A's DL380 Gen12 memory offered only
+      // 0/2/4/8/16/24/32, and a request for 1 failed three times per product as "visible options: none").
+      offered = await this.offeredOptions();
+      // DL320 Gen12 network cards: the menu opened offering only "0"; OCA does not allow this product here.
+      if (offered.length && offered.every((text) => /^0$/.test(text))) {
+        await this.page.keyboard.press('Escape').catch(() => undefined);
+        throw new Error(`OCA offers no quantity above 0 for ${productNumber} (visible options: ${offered.join(', ')})`);
+      }
       let chosen = quantity;
-      if (!menuOption) {
-        // The menu may have opened without this value (OCA can allow only some quantities).
-        offered = (await this.page.locator([
-          '.selecter.open .selecter-item', '.selecter-options:visible .selecter-item',
-          '[role="listbox"]:visible [role="option"]', '.ui-menu:visible .ui-menu-item',
-          // OCA's quantity popup: <div id="action_div" class="popup-menu"><li class="menu-item"><a id="2">2</a>.
-          '.popup-menu:visible .menu-item',
-        ].join(', ')).filter({ visible: true }).allTextContents().catch(() => [] as string[]))
-          .map((text) => text.replace(/\s+/g, ' ').trim()).filter(Boolean);
-        // DL320 Gen12 network cards: the menu opened offering only "0"; OCA does not allow this product here.
-        if (offered.length && offered.every((text) => /^0$/.test(text))) {
-          await this.page.keyboard.press('Escape').catch(() => undefined);
-          throw new Error(`OCA offers no quantity above 0 for ${productNumber} (visible options: ${offered.join(', ')})`);
-        }
+      if (offered.length && !offered.includes(value)) {
         const fallback = acceptOffered ? this.smallestOffered(offered) : undefined;
+        if (fallback === undefined) {
+          await this.page.keyboard.press('Escape').catch(() => undefined);
+          throw new Error(`Quantity option ${value} is not offered for ${productNumber} (visible options: ${offered.join(', ')})`);
+        }
+        chosen = fallback;
+      }
+      let menuOption = await this.findNearestOpenOption(attemptTarget, String(chosen)).catch(() => null);
+      if (!menuOption && !offered.length && acceptOffered) {
+        // A menu that opened slowly: read it again after the wait.
+        const fallback = this.smallestOffered(offered = await this.offeredOptions());
         if (fallback !== undefined) {
           menuOption = await this.findNearestOpenOption(attemptTarget, String(fallback)).catch(() => null);
           chosen = fallback;
@@ -188,6 +193,18 @@ export class QuantityHandler {
     }
     throw new Error(`Quantity option ${value} did not open for the selected row after 3 attempts`
       + ` (visible options: ${offered.length ? offered.join(', ') : 'none'})`);
+  }
+
+  /** Texts of the quantity options now shown in an open menu or list. */
+  private async offeredOptions(): Promise<string[]> {
+    return (await this.page.locator([
+      '.selecter.open .selecter-item', '.selecter-options:visible .selecter-item',
+      '[role="listbox"]:visible [role="option"]', '.ui-menu:visible .ui-menu-item',
+      // OCA's quantity popup: <div id="action_div" class="popup-menu"><li class="menu-item"><a id="2">2</a>.
+      // OCA leaves stale copies of it behind with the same options.
+      '.popup-menu:visible .menu-item',
+    ].join(', ')).filter({ visible: true }).allTextContents().catch(() => [] as string[]))
+      .map((text) => text.replace(/\s+/g, ' ').trim()).filter((text, index, all) => text && all.indexOf(text) === index);
   }
 
   private async findNearestOpenOption(target: Locator, value: string): Promise<Locator | null> {

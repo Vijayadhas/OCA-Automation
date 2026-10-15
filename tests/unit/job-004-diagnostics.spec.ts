@@ -88,3 +88,22 @@ test('stops at once when OCA\'s quantity menu offers only 0', async ({ page }) =
   expect(Date.now() - started).toBeLessThan(15_000);
   expect(snapshots).toEqual([]);
 });
+
+// S3V83A (2026-10-16): the DL380 Gen12 inside the solution offered memory 0/2/4/8/16/24/32. The random
+// pick asked for 1, waited 5 s for it, and the menu had gone before its options were read, so three
+// attempts per product failed with "visible options: none". The options are now read as the menu opens.
+test('takes an offered quantity from a menu that closes before 1 would be found', async ({ page }) => {
+  await page.setContent(`<table><tr class="item_tr" id="item_tr_P69730-F21_memory_memorySlotsChoice">
+    <td><span class="_pid">P69730-F21</span></td>
+    <td class="item_qty"><div class="item_qty_div" onclick="const menu = document.getElementById('action_div');
+      menu.style.display = 'block'; setTimeout(() => { menu.style.display = 'none'; }, 2000)">0</div></td></tr></table>
+    <div id="action_div" class="popup-menu" style="position: absolute; top: 120px; left: 200px; display: none">
+      <ul id="action_ul" class="popup-menu-body compact">${[0, 2, 4, 8, 16, 24, 32].map((value) => `<li class="menu-item compact"
+        onclick="document.querySelector('.item_qty_div').textContent = '${value}'; document.getElementById('action_div').style.display = 'none'">
+        <a id="${value}" name="${value}">${value}</a></li>`).join('')}</ul></div>`);
+  const started = Date.now();
+  const quantity = await new QuantityHandler(page).set(page.locator('tr.item_tr'), 'P69730-F21', 1, false, { acceptOffered: true });
+  expect(quantity).toBe(2);
+  await expect(page.locator('.item_qty_div')).toHaveText('2');
+  expect(Date.now() - started).toBeLessThan(15_000);
+});

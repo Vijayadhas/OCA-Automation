@@ -40,3 +40,5 @@ renderJobs();
 document.querySelectorAll('#jobDialog [data-close-dialog]').forEach((button) => button.addEventListener('click', () => $('#jobDialog').close()));
 // A duplicate-Job-ID message clears as soon as the Job ID is edited.
 $('#jobForm').elements.jobId.addEventListener('input',(event)=>event.target.setCustomValidity(''));
+// Copies the whole Activity log of the run (the page shows only the latest lines), each line with its time.
+$('#copyLog').onclick=async()=>{const button=$('#copyLog');const label='Copy log';let text=$('#console').textContent;if(state.runId){try{const response=await fetch(`/api/runs/${state.runId}/log`);if(response.ok)text=await response.text()}catch{}}try{await navigator.clipboard.writeText(text)}catch{const area=document.createElement('textarea');area.value=text;document.body.appendChild(area);area.select();document.execCommand('copy');area.remove()}button.textContent=`Copied ${text.split('\n').filter(Boolean).length} lines`;setTimeout(()=>{button.textContent=label},2500)};
