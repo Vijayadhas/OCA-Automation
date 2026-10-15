@@ -35,8 +35,37 @@ export function modelWords(text: string): string[] {
     .filter(isModelWord))];
 }
 
+/**
+ * True when a rule word is OCA's abbreviation of a description word: same first letter and its
+ * letters in order ("ht" → hot, "plg" → plug, "opt" → optimized, "dev" → device).
+ */
+export function abbreviates(short: string, word: string): boolean {
+  if (!short || short[0] !== word[0]) return false;
+  let matched = 0;
+  for (const letter of word) if (letter === short[matched]) matched += 1;
+  return matched === short.length;
+}
+
+/**
+ * How many words of an OCA phrase ("NS204i-u Ht Plg Boot Opt Dev") a product description has, exactly
+ * or as abbreviations ("HPE NS204i-u v2 480GB NVMe Hot Plug Boot Optimized Storage Device" → 6).
+ */
+export function phraseScore(phrase: string, description: string): number {
+  const words = (text: string) => text.toLowerCase().split(/[^a-z0-9-]+/)
+    .filter((word) => word.length > 1 && !GENERIC_WORDS.has(word));
+  const described = words(description);
+  return words(phrase).filter((word) => described.some((other) => other === word
+    || (/^[a-z]+$/.test(word) && /^[a-z]+$/.test(other) && abbreviates(word, other)))).length;
+}
+
+/** Words of an OCA phrase that count for phraseScore. */
+export function phraseWordCount(phrase: string): number {
+  return phraseScore(phrase, phrase);
+}
+
 /** Candidates a repair tries before giving up (the model is then retried with fresh picks). */
-const REPAIR_CANDIDATE_TRIES = 6;
+// Products OCA offers only at 0 are skipped in seconds, so a long list (24 network cards) can be tried further.
+const REPAIR_CANDIDATE_TRIES = 10;
 
 /** Words too general to tie an OCA rule to a choice title. */
 const GENERIC_WORDS = new Set(['and', 'or', 'of', 'the', 'for', 'with', 'per', 'must', 'be', 'selected', 'select',
@@ -571,6 +600,70 @@ export class ComponentEngine {
     return false;
   }
 
+  /**
+   * "In SFF CTO Server Max=1 8SFF cable kit is allowed for selection." (DL320 Gen12): more products
+   * of that kind are selected in the choice than allowed (a Smart Chassis template added a PCIe and
+   * an OROC 8SFF cable kit). The extra ones are set to 0, keeping a random allowed number.
+   */
+  private async repairMaxRule(choice: MenuChoice): Promise<boolean> {
+    for (const rule of await this.choiceRules(choice.id)) {
+      const match = rule.ownText.match(/\bMax\s*=\s*(\d+)\s+(.+?)\s+(?:is|are)\s+allowed\b/i);
+      if (!match) continue;
+      const max = Number(match[1]);
+      const kind = match[2];
+      const needed = phraseWordCount(kind);
+      const selected = (await this.rowInfo(this.choiceRows(choice.id)))
+        .filter((row) => row.productNumber && this.committedQuantity(row) > 0 && needed > 0 && phraseScore(kind, row.description) === needed);
+      if (selected.length <= max) continue;
+      const extra = [...selected].sort(() => Math.random() - 0.5).slice(max);
+      console.log(`[STEP] OCA rule "${rule.ownText}": ${selected.length} selected; removing ${extra.map((row) => row.productNumber).join(', ')}`);
+      for (const row of extra) {
+        await this.quantities.set(this.page.locator(`[id=${JSON.stringify(row.id)}]`), row.productNumber, 0, false)
+          .catch((error: unknown) => console.log(`[WARN] Could not remove ${row.productNumber}: ${String(error).split('\n')[0]}`));
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * "NS204i-u Cbl kit requires selection of NS204i-u Ht Plg Boot Opt Dev (OS Boot Device)" (P75217-B21):
+   * the choice already has the cable kit, so the plain repair leaves it alone. The products the rule
+   * asks for are found by its words, abbreviations included, among the unselected rows of the
+   * choices it covers, and one is added.
+   */
+  private async repairRequiresRule(choice: MenuChoice): Promise<boolean> {
+    for (const rule of await this.choiceRules(choice.id)) {
+      const wanted = rule.ownText.match(/requires?\s+(?:the\s+)?selection\s+of\s+(.+?)\s*\.?\s*$/i)?.[1];
+      if (!wanted) continue;
+      const targets = [...new Set([choice.id, ...rule.targets])];
+      await this.openOwners(targets);
+      const rows: Array<RowInfo & { choiceId: string; score: number }> = [];
+      for (const target of targets) {
+        for (const row of await this.rowInfo(this.choiceRows(target))) {
+          if (isPickable(row) && this.committedQuantity(row) === 0) rows.push({ ...row, choiceId: target, score: phraseScore(wanted, row.description) });
+        }
+      }
+      const best = Math.max(0, ...rows.map((row) => row.score));
+      // One shared word (the model name in "NS204i-u Cbl kit") is not enough to tell the products apart.
+      if (best < 2) continue;
+      const candidates = rows.filter((row) => row.score === best);
+      console.log(`[STEP] OCA rule "${rule.ownText}" asks for ${wanted}; adding one of: ${candidates.map((row) => row.productNumber).join(', ')}`);
+      await this.fillOne(choice.title || choice.id, candidates);
+      return true;
+    }
+    return false;
+  }
+
+  /** Choices of the Processor and Memory sections OCA flags as errors now. */
+  private async flaggedMandatoryChoices(): Promise<string[]> {
+    const keys = (await this.sections()).filter((section) => /^(processors?|memory)$/i.test(section.title)).map((section) => section.key);
+    if (!keys.length) return [];
+    return this.page.evaluate((prefixes) => Array.from(document.querySelectorAll('[id^="choice_status_icon_"].img-alert'))
+      .map((icon) => icon.id.slice('choice_status_icon_'.length))
+      .filter((id) => prefixes.some((key) => id.startsWith(`${key}_`))), keys);
+  }
+
   /** Opens the sections owning these choices: only rows the page shows can be picked. */
   private async openOwners(choiceIds: string[]): Promise<void> {
     // Rows behind OCA's "Show more" stay hidden, and choosing one timed out (P83540-B21 cables).
@@ -589,8 +682,14 @@ export class ComponentEngine {
     await this.tryRandomCandidates(label, candidates.map((row) => ({
       row: this.page.locator(`[id=${JSON.stringify(row.id)}]`), productNumber: row.productNumber, choiceId: row.choiceId,
     })), async (candidate) => {
+      const flaggedBefore = new Set(await this.flaggedMandatoryChoices());
       const set = await this.quantities.set(candidate.row, candidate.productNumber, quantity, false, { acceptOffered: true });
-      return this.enforceQuantityRule(candidate.choiceId, candidate.row, candidate.productNumber, set);
+      const committed = await this.enforceQuantityRule(candidate.choiceId, candidate.row, candidate.productNumber, set);
+      // A repair must not break Processor or Memory (P75218-B21: "OCPB R1S Cbl Kit (P75154-B21) is
+      // supported only with 6XX1P processor series"). Failing here restores the row and tries the next one.
+      const broken = (await this.flaggedMandatoryChoices()).filter((id) => !flaggedBefore.has(id) && id !== candidate.choiceId);
+      if (broken.length) throw new Error(`${candidate.productNumber} makes OCA flag ${broken.join(', ')}`);
+      return committed;
     }, REPAIR_CANDIDATE_TRIES);
   }
 
@@ -740,7 +839,13 @@ export class ComponentEngine {
     // already set, so other flagged choices are filled only with products OCA names.
     const flagged = await this.flaggedChoices(section);
     for (const choice of flagged) {
+      if (await this.repairMaxRule(choice)) return;
+    }
+    for (const choice of flagged) {
       if (await this.repairFlaggedChoice(choice, !randomized)) return;
+    }
+    for (const choice of flagged) {
+      if (await this.repairRequiresRule(choice)) return;
     }
     // A rule counting across several choices may sit on a choice that is already filled.
     for (const choice of flagged) {

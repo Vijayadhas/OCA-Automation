@@ -72,3 +72,19 @@ test('reads OCA popup-menu quantities and takes the smallest when 1 is not offer
   expect(quantity).toBe(2);
   await expect(page.locator('.item_qty_div')).toHaveText('2');
 });
+
+test('stops at once when OCA\'s quantity menu offers only 0', async ({ page }) => {
+  // DL320 Gen12 network cards (2026-10-15): the menu opened with a single "0" item.
+  await page.setContent(`<table><tr class="item_tr" id="item_tr_P26259-B21_net_eth">
+    <td><span class="_pid">P26259-B21</span></td>
+    <td class="item_qty"><div class="item_qty_div" onclick="document.getElementById('action_div').style.display = 'block'">0</div></td></tr></table>
+    <div id="action_div" class="popup-menu" style="position: absolute; top: 120px; left: 200px; display: none">
+      <ul id="action_ul" class="popup-menu-body compact"><li class="menu-item selected compact"><a id="0" name="0">0</a></li></ul></div>`);
+  const snapshots: string[] = [];
+  const started = Date.now();
+  await expect(new QuantityHandler(page, async (label) => { snapshots.push(label); })
+    .set(page.locator('tr.item_tr'), 'P26259-B21', 1, false, { acceptOffered: true }))
+    .rejects.toThrow('OCA offers no quantity above 0 for P26259-B21');
+  expect(Date.now() - started).toBeLessThan(15_000);
+  expect(snapshots).toEqual([]);
+});

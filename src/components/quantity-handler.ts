@@ -163,6 +163,11 @@ export class QuantityHandler {
           '.popup-menu:visible .menu-item',
         ].join(', ')).filter({ visible: true }).allTextContents().catch(() => [] as string[]))
           .map((text) => text.replace(/\s+/g, ' ').trim()).filter(Boolean);
+        // DL320 Gen12 network cards: the menu opened offering only "0"; OCA does not allow this product here.
+        if (offered.length && offered.every((text) => /^0$/.test(text))) {
+          await this.page.keyboard.press('Escape').catch(() => undefined);
+          throw new Error(`OCA offers no quantity above 0 for ${productNumber} (visible options: ${offered.join(', ')})`);
+        }
         const fallback = acceptOffered ? this.smallestOffered(offered) : undefined;
         if (fallback !== undefined) {
           menuOption = await this.findNearestOpenOption(attemptTarget, String(fallback)).catch(() => null);
