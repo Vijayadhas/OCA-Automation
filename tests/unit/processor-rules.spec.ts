@@ -120,3 +120,17 @@ test('reads "Minimum N and Maximum M of ... must be selected" as a quantity rang
       M.2 SSD Drive must be selected. (<a class="err-lnk" id="cpuX_cpus">M.2 SSD Drive</a>)</span></li></ul></div>`));
   expect(await new ComponentEngine(page).quantityRule('cpuX_cpus')).toEqual({ min: 2, max: 2, even: false });
 });
+
+// S3V83A's DL380 Gen12 (2026-10-16): the random processor was kept at 1 and this rule stayed flagged.
+test('reads "then Qty2 Processors must be selected" as a minimum and raises the processor to 2', async ({ page }) => {
+  const rule = (text: string, links: string) => `<li class="message_li"><span class="error_message">${text} (${links})</span></li>`;
+  await page.setContent(processorSection([{ pid: 'CPU', radio: false, quantity: 1, select: [0, 1, 2, 3, 4] }]));
+  await page.locator('#choice_header_cpuX_cpus td').evaluate((cell, html) => cell.insertAdjacentHTML('beforeend', html),
+    `<div class="choice_messages error_bgd"><ul>${
+      rule('If this NVMe Trigger is selected, then Qty2 Processors must be selected.', '<a class="err-lnk" id="cpuX_cpus">Processor</a>')
+    }${rule('Qty1 of Localization kit must be selected per configuration.', '<a class="err-lnk" id="cpuX_cpus">Processor</a>')
+    }</ul></div>`);
+  expect(await new ComponentEngine(page).quantityRule('cpuX_cpus')).toEqual({ min: 2, max: Number.POSITIVE_INFINITY, even: false });
+  await new ComponentEngine(page).satisfyRequiredSection('Processor');
+  await expect(page.locator('#item_tr_CPU_cpuX_cpus select')).toHaveValue('2');
+});

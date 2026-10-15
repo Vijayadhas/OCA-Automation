@@ -457,11 +457,16 @@ export class ComponentEngine {
       // "Minimum 2 and Maximum 2 of M.2 SSD Drive must be selected." (P86628-B21, DL110 Gen12).
       // Product names can contain dots ("M.2"), so the words between are matched lazily, not as [^.]*.
       const bounds = text.match(/Minimum\s*(\d+)\s*and\s*Maximum\s*(\d+)\s*of\b.*?\bmust be selected/i);
-      if (!range && !even && !exact && !bounds) continue;
+      // "If this NVMe Trigger is selected, then Qty2 Processors must be selected. (Processor)" (S3V83A's
+      // DL380 Gen12): at least that many of this choice. "Qty1 of P51083-B21 … must be selected" names
+      // another product and is left to the other repairs.
+      const atLeast = text.match(/(?:^|\bthen\s+)Qty\s*=?\s*(\d+)\b(?!\s*of\b).*?\bmust be selected/i);
+      if (!range && !even && !exact && !bounds && !atLeast) continue;
       rule ??= { min: 0, max: Number.POSITIVE_INFINITY, even: false };
       if (range) { rule.min = Math.max(rule.min, Number(range[1])); rule.max = Math.min(rule.max, Number(range[2])); }
       if (bounds) { rule.min = Math.max(rule.min, Number(bounds[1])); rule.max = Math.min(rule.max, Number(bounds[2])); }
       if (exact) { rule.min = Math.max(rule.min, Number(exact[1])); rule.max = Math.min(rule.max, Number(exact[1])); }
+      if (atLeast) rule.min = Math.max(rule.min, Number(atLeast[1]));
       rule.even ||= even;
     }
     return rule;
