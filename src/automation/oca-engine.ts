@@ -1,4 +1,4 @@
-import { resolveConfigurationErrors } from './configuration-errors';
+import { resolveConfigurationErrors, type ResolveOptions } from './configuration-errors';
 import { expect, type BrowserContext, type Page } from '@playwright/test';
 import type { OcaJob } from '../models/job';
 import type { AutomationResult } from '../models/automation-result';
@@ -25,6 +25,7 @@ export interface OcaEngineOptions { baseUrl: string; authWaitMs: number; expecte
 export async function recoverRequiredMenuSelections(
   page: Page,
   components: Pick<ComponentEngine, 'satisfyRequiredSection' | 'satisfyVisibleRequiredControl'>,
+  options: ResolveOptions = {},
 ): Promise<void> {
   const menu = page.locator('a[href="#extended_overview_menu"]')
     .or(page.getByRole('link', { name: /^Menu$/i }))
@@ -34,16 +35,21 @@ export async function recoverRequiredMenuSelections(
   console.log('[STEP] Returning to Menu to resolve selections that disabled Save');
   await safeClick(menu);
   await waitForBlockingOverlay(page);
-  await resolveConfigurationErrors(page, components);
+  await resolveConfigurationErrors(page, components, options);
 }
 
-/** Menu sections every server configuration must have a selection in before Save. */
+/**
+ * Menu sections every server configuration must have a selection in before Save. Only their
+ * error icons are repaired; OCA's other error icons are logged and left as they are.
+ */
 const MANDATORY_SECTIONS = ['Processor', 'Memory'];
+const MANDATORY_ONLY: ResolveOptions = { mandatorySections: MANDATORY_SECTIONS };
 
 export class OcaEngine {
   private page?: Page;
   components!: ComponentEngine;
   currentStep = 'Initialize';
+  private resolveOptions: ResolveOptions = MANDATORY_ONLY;
   private authenticated = false;
 
   constructor(private context: BrowserContext, private readonly options: OcaEngineOptions) {}
@@ -110,7 +116,9 @@ export class OcaEngine {
     }
 
     this.currentStep = 'Resolve required configuration errors';
-    await this.measure('Resolve required configuration errors', () => resolveConfigurationErrors(this.activePage, this.components));
+    // Storage has no Processor or Memory; its required sections (Capacity) are all repaired.
+    this.resolveOptions = job.isStorage ? {} : MANDATORY_ONLY;
+    await this.measure('Resolve required configuration errors', () => resolveConfigurationErrors(this.activePage, this.components, this.resolveOptions));
     if (!job.isStorage && !useSolutionWizard) {
       // Processor and Memory are mandatory: without them the configuration is not saved and no End BOM is made.
       this.currentStep = 'Check mandatory Processor and Memory';
@@ -215,7 +223,7 @@ export class OcaEngine {
       // Fresh copies: random picks are written onto each instruction.
       const summary = await this.configureMenuComponents(job, instructions.map((instruction) => ({ ...instruction })));
       this.currentStep = `Resolve required configuration errors in ${entry.label}`;
-      await this.measure(this.currentStep, () => resolveConfigurationErrors(this.activePage, this.components));
+      await this.measure(this.currentStep, () => resolveConfigurationErrors(this.activePage, this.components, MANDATORY_ONLY));
       this.currentStep = `Check mandatory Processor and Memory in ${entry.label}`;
       for (const section of MANDATORY_SECTIONS) await this.components.mandatorySelection(section);
       summaries.push(`${entry.label}: ${summary}`);
@@ -233,7 +241,7 @@ export class OcaEngine {
       console.log(`[WARN] ${error.message}`);
       this.currentStep = 'Recover required Menu selections before Save';
       await this.measure('Recover required Menu selections before Save', () =>
-        recoverRequiredMenuSelections(this.activePage, this.components));
+        recoverRequiredMenuSelections(this.activePage, this.components, this.resolveOptions));
       this.currentStep = 'Refresh Billing Tier Setup after Menu recovery';
       console.log('[STEP] Reopening BOM after required Menu selections were repaired');
       await this.measure('Refresh Billing Tier Setup after Menu recovery', () => new BillingTier(this.activePage, (label) => this.snapshot(label)).run());

@@ -71,3 +71,33 @@ test('continues past OCA warnings and hidden alert icons', async ({ page }) => {
   });
   expect(repaired).toEqual([]);
 });
+
+// P75399-B21 (DL580 Gen12, 2026-10-15): Storage Devices and Networking stayed flagged and the run stopped.
+// Only Processor and Memory are mandatory; other error icons are left to OCA.
+test('repairs only the mandatory sections when they are given', async ({ page }) => {
+  await page.setContent(`
+    <div id="section_header_storage">Storage Devices<i class="img-alert dqe-status-icon-14">!</i></div>
+    <div id="section_header_cpu">Processor<i class="img-alert dqe-status-icon-14">!</i></div>
+    <div id="section_header_net">Networking<i class="img-alert dqe-status-icon-14">!</i></div>`);
+  const repaired: string[] = [];
+  await resolveConfigurationErrors(page, {
+    satisfyRequiredSection: async (name) => {
+      repaired.push(name);
+      await page.locator('#section_header_cpu i').evaluate((icon) => icon.remove());
+    },
+    satisfyVisibleRequiredControl: async () => false,
+  }, { mandatorySections: ['Processor', 'Memory'] });
+  expect(repaired).toEqual(['Processor']);
+});
+
+test('blocks progress while a mandatory section stays flagged', async ({ page }) => {
+  await page.setContent(`
+    <div id="section_header_net">Networking<i class="img-alert dqe-status-icon-14">!</i></div>
+    <div id="section_header_mem">Memory<i class="img-alert dqe-status-icon-14">!</i></div>`);
+  const error = await resolveConfigurationErrors(page, {
+    satisfyRequiredSection: async () => undefined,
+    satisfyVisibleRequiredControl: async () => false,
+  }, { mandatorySections: ['Processor', 'Memory'] }).catch((caught: Error) => caught);
+  expect(String(error)).toContain('OCA error icons remain: Memory');
+  expect(String(error)).not.toContain('Networking');
+});
