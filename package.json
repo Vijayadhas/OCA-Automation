@@ -7,6 +7,7 @@
     "oca": "tsx src/main.ts",
     "ui": "tsx src/app/ui-server.ts",
     "sample:excel": "tsx scripts/create-sample-workbook.ts",
+    "template:excel": "tsx scripts/create-input-template.ts",
     "lint": "eslint src scripts tests/unit --ext .ts",
     "test": "playwright test",
     "test:unit": "playwright test tests/unit --workers=1",

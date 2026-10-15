@@ -47,6 +47,24 @@ managed Smart Chassis choice) behaves the same way. Quotation Mode must be `aaS`
 before the run starts. When `Model Type` is given, it overrides `Solution` and `Storage`. When it is
 blank, those older columns decide, and a workspace that opens only a Solution Wizard is still detected.
 
+`Model Type` `Nutanix` is a server sold to the Nutanix customer account: before the search, Customer
+Account is set to `Nutanix` in the landing page's Advanced Settings, and the search result containing
+"Nutanix" is opened (a `Model Description`, when given, is used instead). The rest is the Server route.
+`Customer Account` (optional) sets any account OCA lists. The setting stays in OCA between models, so a
+model without an account clears it before its search.
+
+### Input template
+
+`npm run template:excel` writes `input/OCA-Input-Template.xlsx`; the dashboard's **Download Excel
+template** button gives the same file. Its `Models` sheet has every field of the Add model dialog,
+`Components` holds optional component rows, and `Instructions` explains each column. A model with no
+`Components` rows gets random Processor, Memory, Smart Chassis and Power Supplies, as in the dashboard.
+
+### Page HTML at every step
+
+Failed models always save their page HTML. Tick **Save page HTML at every step** in the dashboard (or
+pass `--capture-html`) to also save the page after every step, under `output/html/<Job ID>/`.
+
 Set `Storage` to `Yes` for a standalone storage model. The storage flow selects available Cloud
 Connectivity, Controller Node Models, and Capacity choices from OCA and derives quantities from the
 controls exposed by the page. A row cannot have both `Solution` and `Storage` set to `Yes`.

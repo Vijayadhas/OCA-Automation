@@ -29,7 +29,7 @@ export function writeRunWorkbook(jobs: OcaJob[], target: string): void {
     Solution: job.isSolution ? 'Yes' : 'No', 'Solution Name': job.solutionName ?? '',
     Storage: job.isStorage ? 'Yes' : 'No',
     'Integration Rack Part number': job.integrationRackPartNumber ?? '', Server: job.server ?? '',
-    'Quotation Mode': 'aaS', 'Service Type': job.serviceType,
+    'Customer Account': job.customerAccount ?? '', 'Quotation Mode': 'aaS', 'Service Type': job.serviceType,
     'Generate End BOM': job.generateEndBom ? 'Yes' : 'No', Enabled: job.enabled ? 'Yes' : 'No',
   }));
   const componentRows = jobs.flatMap((job) => job.source.kind === 'detailed-excel'

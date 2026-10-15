@@ -7,6 +7,7 @@ import multer from 'multer';
 import * as XLSX from 'xlsx';
 import { ExcelReader } from '../excel/excel-reader';
 import { ExcelValidator } from '../excel/excel-validator';
+import { buildInputTemplate } from '../excel/input-template';
 import type { OcaJob } from '../models/job';
 import { prepareRunJobs, writeRunWorkbook } from './run-workbook';
 
@@ -69,6 +70,13 @@ app.post('/api/import', upload.single('workbook'), (req, res) => {
   } finally {
     fs.rmSync(tempPath, { force: true });
   }
+});
+
+/** The input workbook to fill in, with every field of the Add model dialog. */
+app.get('/api/template', (_req, res) => {
+  const buffer = XLSX.write(buildInputTemplate(), { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+  res.setHeader('Content-Disposition', 'attachment; filename="OCA-Input-Template.xlsx"');
+  res.type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet').send(buffer);
 });
 
 const activeRun = () => [...runs.values()].find((run) => run.process);

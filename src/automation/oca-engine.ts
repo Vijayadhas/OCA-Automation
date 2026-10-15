@@ -1,6 +1,7 @@
 import { resolveConfigurationErrors, type ResolveOptions } from './configuration-errors';
 import { expect, type BrowserContext, type Page } from '@playwright/test';
-import type { OcaJob } from '../models/job';
+import { customerAccountFor, searchDescriptionFor, type OcaJob } from '../models/job';
+import { CustomerAccount } from './customer-account';
 import type { AutomationResult } from '../models/automation-result';
 import { createPendingResult } from '../models/automation-result';
 import { waitForBlockingOverlay } from '../core/waits';
@@ -74,13 +75,17 @@ export class OcaEngine {
     await this.measure('Open OCA', () => this.openOca());
     this.currentStep = 'Select aaS';
     await this.measure('Select aaS and verify landing', () => this.selectAasAndVerifyLanding());
+    // Customer Account stays set in OCA between models, so each model sets its own or clears it.
+    this.currentStep = 'Set Customer Account';
+    await this.measure('Set Customer Account', () => new CustomerAccount(this.activePage).apply(customerAccountFor(job)));
     this.currentStep = 'Search model';
-    const route = job.isStorage ? 'Storage' : job.isSolution ? 'Solution' : 'Server';
-    console.log(`[INFO] Excel model selection: model type=${job.modelType ? route : `<blank>, treated as ${route}`}; description=${job.modelDescription ?? job.solutionName ?? '<blank>'}; integration rack=${job.integrationRackPartNumber ?? '<blank>'}`);
+    const route = job.isStorage ? 'Storage' : job.isSolution ? 'Solution' : job.modelType === 'Nutanix' ? 'Nutanix (Server route)' : 'Server';
+    const description = searchDescriptionFor(job);
+    console.log(`[INFO] Excel model selection: model type=${job.modelType ? route : `<blank>, treated as ${route}`}; description=${description ?? '<blank>'}; customer account=${customerAccountFor(job) || '<none>'}; integration rack=${job.integrationRackPartNumber ?? '<blank>'}`);
     const model = await this.measure('Search and open model', () =>
       new ModelSearch(this.context).searchAndOpen(this.activePage, {
         modelNumber: job.modelNumber,
-        description: job.modelDescription ?? job.solutionName,
+        description,
         isSolution: job.isSolution,
         integrationRackPartNumber: job.integrationRackPartNumber,
       }));
