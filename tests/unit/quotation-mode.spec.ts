@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { readLandingMode, selectAasMode } from '../../src/automation/quotation-mode';
+import { readLandingMode, selectAasMode, selectAasModeWithReload } from '../../src/automation/quotation-mode';
 
 const toggle = (onAasClick: string) => `
   <div class="mode-toggle">
@@ -47,4 +47,19 @@ test('fails clearly when no aaS option exists anywhere', async ({ page }) => {
   await page.setContent('<input id="search-config" placeholder="Search config">');
   await expect(selectAasMode(page, { landingWaitMs: 5_000, aasAppearMs: 500 }))
     .rejects.toThrow(/aaS option was not found on the landing page or in the New Configuration menu/);
+});
+
+// P72176-B21 (2026-10-16): after sign-in OCA stayed on "Loading..." for the whole wait and the model failed.
+test('reloads OCA once when it stays on its Loading screen, then selects aaS', async ({ page }) => {
+  let loads = 0;
+  await page.route('http://oca.test/**', (route) => {
+    loads += 1;
+    return route.fulfill({ contentType: 'text/html', body: loads === 1
+      ? '<div class="blockUI blockMsg"><span class="maui-loading-label">Loading...</span></div>'
+      : toggle("document.getElementById('buy').classList.remove('active'); this.classList.add('active')") });
+  });
+  await page.goto('http://oca.test/OCAInternalLogin');
+  await selectAasModeWithReload(page, { landingWaitMs: 1_000, landingMinimumMs: 1_000, aasAppearMs: 500 });
+  expect(loads).toBe(2);
+  expect(await readLandingMode(page)).toMatchObject({ aasSelected: true, buySelected: false });
 });

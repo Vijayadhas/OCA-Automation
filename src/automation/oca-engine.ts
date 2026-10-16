@@ -18,7 +18,7 @@ import { EndBom } from './end-bom';
 import { SupportServices } from './support-services';
 import { SolutionWizard } from './solution-wizard';
 import { StorageFlow } from './storage-flow';
-import { selectAasMode } from './quotation-mode';
+import { selectAasModeWithReload } from './quotation-mode';
 import type { HtmlCapture } from '../reporting/html-capture';
 
 export interface OcaEngineOptions { baseUrl: string; authWaitMs: number; expectedPageText: string; html?: HtmlCapture; }
@@ -358,7 +358,7 @@ export class OcaEngine {
   }
 
   private async selectAasAndVerifyLanding(): Promise<void> {
-    await selectAasMode(this.activePage, { landingWaitMs: this.options.authWaitMs });
+    await selectAasModeWithReload(this.activePage, { landingWaitMs: this.options.authWaitMs });
   }
 
   private async verifyQuotationMode(): Promise<string> {

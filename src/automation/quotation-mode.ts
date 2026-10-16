@@ -14,6 +14,8 @@ export interface AasSelectionOptions {
   landingWaitMs: number;
   /** Extra time for the aaS option to render once the search box is already visible. */
   aasAppearMs?: number;
+  /** Shortest landing wait (default 60 s); tests shorten it. */
+  landingMinimumMs?: number;
 }
 
 const searchBox = (page: Page) => page.getByRole('textbox', { name: /Search to open UCID or create|Search config/i })
@@ -66,6 +68,23 @@ const describe = (state: LandingModeState) =>
  * none, New Configuration > aaS in the header), and fails here rather than letting
  * the model open in Buy mode.
  */
+/**
+ * selectAasMode, reloading OCA once when it stays on its "Loading..." screen (P72176-B21,
+ * 2026-10-16: the landing page never loaded after sign-in). Nothing is configured yet, so a
+ * reload is not a model retry.
+ */
+export async function selectAasModeWithReload(page: Page, options: AasSelectionOptions): Promise<void> {
+  try {
+    await selectAasMode(page, options);
+  } catch (error) {
+    if (!(error instanceof OcaPageLoadError)) throw error;
+    console.log(`[WARN] ${error.message}; reloading OCA once (nothing is configured yet)`);
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 60_000 });
+    await waitForBlockingOverlay(page);
+    await selectAasMode(page, options);
+  }
+}
+
 export async function selectAasMode(page: Page, options: AasSelectionOptions): Promise<void> {
   const search = searchBox(page);
   const landingAas = page.locator('button, a, li, label, span, div')
@@ -73,7 +92,7 @@ export async function selectAasMode(page: Page, options: AasSelectionOptions): P
   const headerAas = page.locator('#header_greenlake').first();
   const headerMenu = page.locator('#header_new_config_label').first();
 
-  const landingWaitMs = Math.max(options.landingWaitMs, 60_000);
+  const landingWaitMs = Math.max(options.landingWaitMs, options.landingMinimumMs ?? 60_000);
   try {
     await expect.poll(async () => await landingAas.isVisible().catch(() => false) || await search.isVisible().catch(() => false), {
       timeout: landingWaitMs, message: 'Authenticated OCA landing page (aaS option or search box)',
