@@ -1,5 +1,5 @@
 import { test, expect, type Locator } from '@playwright/test';
-import { ComponentEngine, MAX_RANDOM_PROCESSOR_WATTS, fitQuantity } from '../../src/automation/component-engine';
+import { ComponentEngine, MAX_RANDOM_PROCESSOR_WATTS, fitQuantity, requiredProcessorSeries } from '../../src/automation/component-engine';
 import { resolveConfigurationErrors } from '../../src/automation/configuration-errors';
 import { QuantityHandler } from '../../src/components/quantity-handler';
 import { menuSection, type FixtureRow } from './oca-menu-fixture';
@@ -134,3 +134,42 @@ test('reads "then Qty2 Processors must be selected" as a minimum and raises the 
   await new ComponentEngine(page).satisfyRequiredSection('Processor');
   await expect(page.locator('#item_tr_CPU_cpuX_cpus select')).toHaveValue('2');
 });
+
+test('reads the processor series an OCA rule requires (X = any digit)', () => {
+  const series = (text: string) => requiredProcessorSeries(text)?.pattern;
+  const dl340 = series('Front 4xGPU Enable kit can be selected only if 6XX1P processor is selected');
+  const dl320 = series("In 'SFF/EDSFF CTO server': Qty=3 of 4EDSFF BP Kit along with HPE DL320 G12 12EDSFF DA Cbl Kit can be selected only if 6XXX1P processor is selected");
+  for (const pattern of [dl340!, dl320!, series('20EDSFF DA cbl kit is supported only with 6XX1P processor series')!]) {
+    expect(pattern.test('Intel Xeon 6521P 2.6GHz 24-core 225W Processor for HPE')).toBe(true);
+    expect(pattern.test('Intel Xeon 6741P 2.5GHz 48-core 300W Processor for HPE')).toBe(true);
+    expect(pattern.test('Intel Xeon 6520P 2.4GHz 24-core 210W Processor for HPE')).toBe(false);
+    expect(pattern.test('Intel Xeon 6710E 2.4GHz 64-core 205W Processor for HPE')).toBe(false);
+  }
+  expect(requiredProcessorSeries('Odd quantities of processor selection is not allowed.')).toBeNull();
+  expect(requiredProcessorSeries('In 8SFFx1 U.3 Kit processor')).toBeNull();
+});
+
+// P75728-B21 (DL340 Gen12) and P75217-B21 (DL320 Gen12), 2026-10-18: a random Smart Chassis needs a 6XX1P
+// processor and OCA's preselected one is not. The DL320 rule's "Qty=3 of 4EDSFF BP Kit" raised the
+// processor to 3 twelve times; the processor must be swapped for the series instead, at the same quantity.
+for (const [model, text] of [
+  ['P75728-B21', 'In GPU CTO server, 4EDSFF Kit or 8SFFx1 U.3 Kit can be selected only if 6XX1P processor is selected'],
+  ['P75217-B21', "In 'SFF/EDSFF CTO server': Qty=3 of 4EDSFF BP Kit along with HPE DL320 G12 12EDSFF DA Cbl Kit can be selected only if 6XXX1P processor is selected"],
+] as const) {
+  test(`replaces the processor with the series OCA requires (${model})`, async ({ page }) => {
+    await page.setContent(menuSection({ key: 'cpuX', title: 'Processor', choices: [
+      { id: 'cpuX_cpus', title: 'Processor', flagged: true, rows: [
+        { pid: 'OLD-CPU', description: 'Intel Xeon 6520P 2.4GHz 24-core 210W Processor for HPE', quantity: 1, select: [0, 1, 2] },
+        { pid: 'HOT-6761P', description: 'Intel Xeon 6761P 2.5GHz 64-core 350W Processor for HPE', select: [0, 1, 2] },
+        { pid: 'SERIES-6521P', description: 'Intel Xeon 6521P 2.6GHz 24-core 225W Processor for HPE', select: [0, 1, 2] },
+      ], messages: `<li class="message_li"><span class="error_message">${text} (<a class="err-lnk" id="cageX_cages">Drive Cage</a>,
+        <a class="err-lnk" id="cpuX_cpus">Processor</a>)</span></li>` },
+    ] }) + menuSection({ key: 'cageX', title: 'Drive Cage', choices: [
+      { id: 'cageX_cages', title: 'Drive Cage', rows: [{ pid: 'CAGE', description: '4EDSFF BP Kit', quantity: 3, select: [0, 3] }] },
+    ] }));
+    await new ComponentEngine(page).satisfyRequiredSection('Processor');
+    await expect(page.locator('#item_tr_SERIES-6521P_cpuX_cpus select')).toHaveValue('1');
+    await expect(page.locator('#item_tr_OLD-CPU_cpuX_cpus select')).toHaveValue('0');
+    await expect(page.locator('#item_tr_HOT-6761P_cpuX_cpus select')).toHaveValue('0');
+  });
+}

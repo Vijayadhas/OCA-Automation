@@ -78,7 +78,11 @@ export class ConfigurationNavigation {
       .toContainText(entry.label, { timeout: 60_000 });
   }
 
-  /** Opens a level of the breadcrumb again (the solution after its servers); else goes up one level. */
+  /**
+   * Opens a level again (the solution after its servers): by its breadcrumb entry, else by its entry in
+   * the navigation tree, else one level up. On S3V83A the server sat under "Virtual Rack Service #1",
+   * a sibling of the solution, so going up opened the rack, not the solution (2026-10-18).
+   */
   async returnTo(level: string): Promise<void> {
     if (!level || await this.currentLevel() === level) return;
     const crumb = this.page.locator('li.eo_nav_li').filter({ visible: true, hasText: new RegExp(`^\\s*${escapeRegex(level)}\\s*$`) }).first();
@@ -86,6 +90,11 @@ export class ConfigurationNavigation {
       console.log(`[STEP] Returning to ${level}`);
       await crumb.click({ force: true });
     } else {
+      const entry = (await this.entries()).find((item) => item.label === level);
+      if (entry) {
+        await this.open(entry);
+        return;
+      }
       console.log(`[STEP] Returning to the parent level (${level} is not in the breadcrumb)`);
       await this.page.locator('#nav_up').first().click({ force: true });
     }

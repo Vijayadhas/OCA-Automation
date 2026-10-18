@@ -50,3 +50,17 @@ test('a different part number, or one that only starts the same, is not a match'
   expect((await navigation.entriesForPart('P53921-B21')).map((entry) => entry.label)).toEqual(['DL385 Gen11 #1']);
   expect(await navigation.entriesForPart('P53921')).toEqual([]);
 });
+
+// S3V83A (2026-10-18): the server sat under "Virtual Rack Service #1", a sibling of the solution, so the
+// breadcrumb no longer held the solution and going up opened the rack. The tree entry opens it.
+test('returns to a solution that is not in the breadcrumb through the navigation tree', async ({ page: browser }) => {
+  const rackLevel = page().replace(/<ul id="nav">[\s\S]*?<\/ul>/, `<ul id="nav">
+    <li class="eo_nav_li ">OCA Config 2</li><li class="eo_nav_li ">${solution} Group</li>
+    <li class="eo_nav_li ">Virtual Rack Service #1</li><li class="eo_nav_li current">DL385 Gen11 #1</li></ul>`)
+    .replace('<ul></ul></li>', `<ul></ul></li>${item(`|F7D86DEC3F23B676A9AFA40E1B886B57|instance_2_GROUP|arcusDhciSol_1`, solution,
+      'HPE GreenLake for PC3000 with Alletra Storage MP (Block)')}`);
+  await browser.setContent(rackLevel);
+  const navigation = new ConfigurationNavigation(browser);
+  await navigation.returnTo(solution);
+  expect(await navigation.currentLevel()).toBe(solution);
+});

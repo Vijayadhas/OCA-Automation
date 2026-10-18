@@ -85,6 +85,19 @@ export function mentionsProduct(text: string, productNumber: string): boolean {
   return new RegExp(`(^|[^A-Za-z0-9])${escapeRegex(productNumber)}(?![A-Za-z0-9-])`, 'i').test(text);
 }
 
+/**
+ * The processor series an OCA rule requires: "20EDSFF DA cbl kit ... is supported only with 6XX1P
+ * processor series" (P75217-B21, DL320 Gen12) or "Front 4xGPU Enable kit can be selected only if 6XX1P
+ * processor is selected" (P75728-B21, DL340 Gen12). X stands for a digit, so 6XX1P matches "Intel Xeon
+ * 6521P". OCA also writes "6XXX1P" for the same series, so a run of Xs matches up to that many digits.
+ */
+export function requiredProcessorSeries(text: string): { name: string; pattern: RegExp } | null {
+  const name = text.match(/\b(\d*X+[\dX]*[A-Z]*)\s+processors?\b/)?.[1];
+  if (!name || !/\d/.test(name)) return null;
+  const source = name.replace(/X+/g, (run) => `\\d{1,${run.length}}`);
+  return { name, pattern: new RegExp(`\\b${source}\\b`) };
+}
+
 /** Blank and filler kits are never chosen at random. */
 /** A memory slot filler: "HPE DDR4 DIMM Blank Kit" (P07818-B21), choice "Memory Blank Kit". Not memory. */
 export function isDimmBlank(text: string): boolean {
@@ -172,12 +185,17 @@ export class ComponentEngine {
 
   /**
    * The product selected in a mandatory section (Processor, Memory). Fails with
-   * MandatorySelectionError when the section is missing or nothing is selected in its main choice,
-   * so the configuration is never saved without it.
+   * MandatorySelectionError when nothing is selected in its main choice, so the configuration is
+   * never saved without it. A model whose Menu has no such section (P86628-B21, DL110 Gen12: the
+   * processor is part of the base server, OCA shows no Processor section) has nothing to select
+   * there; that is logged and null returned. An empty Menu fails earlier, in ensureMenuLoaded.
    */
-  async mandatorySelection(sectionName: string): Promise<Selection> {
+  async mandatorySelection(sectionName: string): Promise<Selection | null> {
     const section = await this.findSection(sectionName);
-    if (!section) throw new MandatorySelectionError(`${sectionName} is mandatory, but the ${sectionName} section was not found; the configuration was not saved`);
+    if (!section) {
+      console.log(`[WARN] OCA offers no ${sectionName} section for this model (part of the base server); nothing to check`);
+      return null;
+    }
     await this.open(section);
     const choice = await this.mainChoice(section);
     const existing = choice ? await this.existingSelection(choice.id) : null;
@@ -572,7 +590,9 @@ export class ComponentEngine {
    */
   private async repairGroupRule(choice: MenuChoice): Promise<boolean> {
     for (const rule of await this.choiceRules(choice.id)) {
-      if (rule.targets.length < 2) continue;
+      // "Qty=3 of 4EDSFF BP Kit ... only if 6XXX1P processor is selected" counts BP kits, not processors:
+      // it raised the processor to 3 twelve times (P75217-B21). repairSeriesRule handles it.
+      if (rule.targets.length < 2 || requiredProcessorSeries(rule.ownText)) continue;
       const ruleWords = new Set(titleWords(rule.ownText));
       const titles = await this.page.evaluate((ids) => ids.map((id) =>
         (document.getElementById(`choice_title_${id}`)?.textContent ?? '').replace(/\s+/g, ' ').trim()), rule.targets);
@@ -663,6 +683,37 @@ export class ComponentEngine {
       const candidates = rows.filter((row) => row.score === best);
       console.log(`[STEP] OCA rule "${rule.ownText}" asks for ${wanted}; adding one of: ${candidates.map((row) => row.productNumber).join(', ')}`);
       await this.fillOne(choice.title || choice.id, candidates);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * A rule needs a processor series the selected processor is not: on P75728-B21 (DL340 Gen12) the random
+   * Smart Chassis brought a Front 4xGPU kit that "can be selected only if 6XX1P processor is selected",
+   * while OCA's preselected processor was kept. A processor of that series is selected with the same
+   * quantity, then the old one is removed (a radio row replaces it by itself).
+   */
+  private async repairSeriesRule(choice: MenuChoice): Promise<boolean> {
+    const existing = await this.existingSelection(choice.id);
+    for (const rule of await this.choiceRules(choice.id)) {
+      const series = requiredProcessorSeries(rule.ownText);
+      if (!series || (existing && series.pattern.test(existing.description))) continue;
+      const rows = (await this.rowInfo(this.choiceRows(choice.id)))
+        .filter((row) => isPickable(row) && row.id !== existing?.rowId && series.pattern.test(row.description));
+      if (!rows.length) continue;
+      const withinWatts = rows.filter((row) => !(Number(row.description.match(/(\d+)\s*W\b/i)?.[1]) > MAX_RANDOM_PROCESSOR_WATTS));
+      const candidates = withinWatts.length ? withinWatts : rows;
+      console.log(`[STEP] OCA rule "${rule.ownText}" needs a ${series.name} processor`
+        + `${existing ? ` (${existing.productNumber} is not)` : ''}: ${candidates.map((row) => row.productNumber).join(', ')}`);
+      await this.fillOne(choice.title || choice.id, candidates.map((row) => ({ ...row, choiceId: choice.id })), existing?.quantity ?? 1);
+      if (existing) {
+        const old = this.page.locator(`[id=${JSON.stringify(existing.rowId)}]`);
+        if (Number(await this.quantities.committedQuantity(old, existing.productNumber)) > 0) {
+          console.log(`[STEP] Removing ${existing.productNumber}, which is not a ${series.name} processor`);
+          await this.quantities.set(old, existing.productNumber, 0, false);
+        }
+      }
       return true;
     }
     return false;
@@ -853,6 +904,9 @@ export class ComponentEngine {
     const flagged = await this.flaggedChoices(section);
     for (const choice of flagged) {
       if (await this.repairMaxRule(choice)) return;
+    }
+    for (const choice of flagged) {
+      if (await this.repairSeriesRule(choice)) return;
     }
     for (const choice of flagged) {
       if (await this.repairFlaggedChoice(choice, !randomized)) return;

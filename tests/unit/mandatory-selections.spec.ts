@@ -28,11 +28,15 @@ test('fails before Save when no Processor is selected', async ({ page }) => {
   expect(String(error)).toContain('Processor is mandatory, but nothing is selected');
 });
 
-test('fails before Save when the model has no Memory section', async ({ page }) => {
-  await page.setContent(menuSection({ key: 'cpu', title: 'Processor', choices: [
-    { id: 'cpu_main', title: 'Processor', rows: [{ pid: 'CPU-A', quantity: 1, select: [0, 1] }] },
+// P86628-B21 (DL110 Gen12, 2026-10-18): the processor is part of the base server and OCA shows no
+// Processor section, so there is nothing to select or check.
+test('a model without a Processor section passes the check with nothing to select', async ({ page }) => {
+  await page.setContent(menuSection({ key: 'memory', title: 'Memory', choices: [
+    { id: 'memory_main', title: 'Memory', rows: [{ pid: 'DIMM-A', quantity: 1, select: [0, 1] }] },
   ] }));
-  await expect(new ComponentEngine(page).mandatorySelection('Memory')).rejects.toThrow(/Memory is mandatory, but the Memory section was not found/);
+  const engine = new ComponentEngine(page);
+  expect(await engine.mandatorySelection('Processor')).toBeNull();
+  expect(await engine.mandatorySelection('Memory')).toMatchObject({ productNumber: 'DIMM-A' });
 });
 
 // The Services tab structure SupportServices already relies on (#experience-and-term, option groups).
