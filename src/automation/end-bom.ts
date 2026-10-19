@@ -48,6 +48,15 @@ export class EndBom {
 
     const autoGenerate = this.page.getByRole('button', { name: /Auto-?generate(?:d)?/i }).filter({ visible: true }).first();
     await expect(autoGenerate).toBeVisible({ timeout: 60_000 });
+    // S2G16A/S2G18A (DL320 Gen11 for Cohesity, 2026-10-19): <button id="endbom_autogen" class="... billingtier-disabled"
+    // title="Currently not supported for auto generation. Use manual">. Clicking it does nothing and
+    // Generate End BOM never shows; the saved configuration stays, and the reason is reported at once.
+    const autoClass = await autoGenerate.getAttribute('class').catch(() => '') ?? '';
+    if (/\bbillingtier-disabled\b/.test(autoClass) || await autoGenerate.isDisabled().catch(() => false)) {
+      const reason = (await autoGenerate.getAttribute('title').catch(() => '') ?? '').trim();
+      throw new Error(`OCA does not offer Auto-generate End BOM for this model${reason ? ` ("${reason}")` : ''}; `
+        + 'the configuration is saved, but its End BOM has to be made manually');
+    }
     console.log('[STEP] Selecting Auto-generate');
     await autoGenerate.click({ force: true });
     await waitForBlockingOverlay(this.page);

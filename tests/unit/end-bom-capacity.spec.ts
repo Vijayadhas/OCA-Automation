@@ -31,3 +31,14 @@ test('reads Start and End BOM capacity from the visible columns only', async ({ 
   });
   expect(await endBom.readBillingTierTable('missing_table')).toBeNull();
 });
+
+// S2G16A and S2G18A (DL320 Gen11 for Cohesity, 2026-10-19): OCA disables Auto-generate for these models.
+test('reports at once when OCA does not offer Auto-generate End BOM', async ({ page }) => {
+  await page.setContent(`<button id="obw_endbom_bot">End BOM</button>
+    <button id="endbom_autogen" data-endbom="auto" class="hpe-btn hpe-secondary billingtier-disabled"
+      title="Currently not supported for auto generation. Use manual"> Auto-generate </button>`);
+  const started = Date.now();
+  await expect(new EndBom(page).generateAndAssociate()).rejects
+    .toThrow('OCA does not offer Auto-generate End BOM for this model ("Currently not supported for auto generation. Use manual")');
+  expect(Date.now() - started).toBeLessThan(15_000);
+});

@@ -47,3 +47,21 @@ test('acknowledges an incomplete Billing Tier Setup when the capacity cannot be 
   await expect(page.locator('#bt')).toBeHidden();
   expect(snapshots).toContain('WARN-Billing Tier Setup incomplete');
 });
+
+// P52765-B21 and S2G17A (DL320 Gen11, 2026-10-19): selecting OCA Config 2 in BOM opened OCA's problem
+// dialog, whose overlay blocked Billing Tier Setup. The dialog is closed and BOM opened again.
+test('closes OCA\'s problem dialog after selecting the BOM configuration and opens BOM again', async ({ page }) => {
+  await page.setContent(bomPage(true).replace('<div id="eo_nav_li_0">', `<div id="eo_nav_li_0" onclick="if (!window.failed) { window.failed = true;
+      document.getElementById('problem').style.display = 'block'; document.getElementById('veil').style.display = 'block'; }">`) + `
+    <div id="veil" class="ui-widget-overlay ui-front" style="display:none;position:fixed;inset:0;z-index:10"></div>
+    <div id="problem" class="ui-dialog" role="dialog" style="display:none;position:fixed;top:0;z-index:11">
+      <span class="ui-dialog-title">(OCA) has encountered a problem</span>
+      <button class="ui-dialog-titlebar-close" onclick="document.getElementById('problem').style.display='none';
+        document.getElementById('veil').style.display='none'">x</button>
+      <div id="error_detail_message">java.lang.NoSuchMethodException: Widget does not exist on current page: extended_overview:bom:bom_tab</div>
+    </div>`);
+  await new BillingTier(page).run();
+  await expect(page.locator('#problem')).toBeHidden();
+  await expect(page.locator('#bt')).toBeHidden();
+  await expect(page.locator('.btier-editableNumber')).toHaveText('1');
+});

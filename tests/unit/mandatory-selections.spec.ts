@@ -75,3 +75,13 @@ test('a DIMM Blank Kit never counts as the Memory selection', async ({ page }) =
   expect(await engine.existingSelection('mem_blank')).toBeNull();
   await expect(engine.mandatorySelection('Memory')).rejects.toThrow('Memory is mandatory, but nothing is selected');
 });
+
+// P73285-B21 (DL380 Gen12, 2026-10-18): the first Services click was lost while OCA recalculated.
+test('clicks the Services tab again when its panel does not appear', async ({ page }) => {
+  await page.setContent(servicesPage(false)
+    .replace('<a href="#services" role="link">', `<a href="#services" role="link" onclick="window.clicks = (window.clicks ?? 0) + 1;
+      if (window.clicks > 1) document.getElementById('experience-and-term').style.display = 'block'">`)
+    .replace('<div id="experience-and-term">', '<div id="experience-and-term" style="display:none">'));
+  expect(await new SupportServices(page).select()).toMatchObject({ serviceExperience: 'Standard' });
+  expect(await page.evaluate(() => (window as unknown as { clicks: number }).clicks)).toBe(2);
+});

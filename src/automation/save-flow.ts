@@ -7,10 +7,34 @@ export class SaveRecoveryRequiredError extends Error {
   constructor(message: string) { super(message); this.name = 'SaveRecoveryRequiredError'; }
 }
 
+/** The Save dialog closed, but OCA showed neither a saved UCID nor the End BOM action. */
+export class SaveNotConfirmedError extends Error {
+  constructor(message: string) { super(message); this.name = 'SaveNotConfirmedError'; }
+}
+
+/**
+ * The UCID OCA shows once a configuration is saved ("UCID 5157328606-01"). Before that the header reads
+ * "UCID TempUCID", which P73282-B21 (DL380 Gen12, 2026-10-18) took for a saved UCID.
+ */
+export function savedUcid(text: string): string {
+  return text.replace(/\s+/g, ' ').match(/\bUCID\s*[:#-]?\s*(\d{6,}(?:-\d{1,3})?)\b/i)?.[1] ?? '';
+}
+
 export class SaveFlow {
   constructor(private readonly page: Page, private readonly options: SaveFlowOptions = {}) {}
 
+  /** Saves the configuration; when the Save dialog closed without a saved UCID, Save is run once more. */
   async save(): Promise<SaveOutcome> {
+    try {
+      return await this.saveOnce();
+    } catch (error) {
+      if (!(error instanceof SaveNotConfirmedError)) throw error;
+      console.log(`[WARN] ${error.message}; running Save once more`);
+      return this.saveOnce();
+    }
+  }
+
+  private async saveOnce(): Promise<SaveOutcome> {
     await waitForBlockingOverlay(this.page);
     console.log('[STEP] Opening Save menu');
     const saveMenu = this.page.getByText('Save', { exact: true }).filter({ visible: true }).first();
@@ -178,8 +202,7 @@ export class SaveFlow {
   }
 
   private async readUcid(): Promise<string> {
-    const body = (await this.page.locator('body').innerText()).replace(/\s+/g, ' ');
-    return body.match(/\bUCID\s*[:#-]?\s*([A-Za-z0-9_-]{4,})/i)?.[1] ?? '';
+    return savedUcid(await this.page.locator('body').innerText().catch(() => ''));
   }
 
   private async isDisabled(button: Locator): Promise<boolean> {
@@ -216,13 +239,15 @@ export class SaveFlow {
       .or(this.page.getByRole('link', { name: /End BOM/i }))
       .or(this.page.getByText(/^End BOM$/i)).filter({ visible: true }).first();
 
-    await expect.poll(async () => {
+    const confirmed = await expect.poll(async () => {
       ucid = await this.readUcid();
       return Boolean(ucid) || await endBomEntry.isVisible({ timeout: 500 }).catch(() => false);
     }, {
       timeout: this.options.confirmationTimeoutMs ?? 60_000,
-      message: 'Saved OCA configuration confirmation (UCID or End BOM action)',
-    }).toBe(true);
+    }).toBe(true).then(() => true, () => false);
+    if (!confirmed) {
+      throw new SaveNotConfirmedError('The Save dialog closed, but OCA shows no saved UCID (still TempUCID) and no End BOM action');
+    }
 
     console.log(`[INFO] OCA configuration save confirmed${ucid ? ` with UCID ${ucid}` : ' by the available End BOM action'}`);
     return { ucid, status: 'Saved' };

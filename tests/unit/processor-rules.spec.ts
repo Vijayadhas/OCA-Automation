@@ -1,5 +1,5 @@
 import { test, expect, type Locator } from '@playwright/test';
-import { ComponentEngine, MAX_RANDOM_PROCESSOR_WATTS, fitQuantity, requiredProcessorSeries } from '../../src/automation/component-engine';
+import { ComponentEngine, MAX_RANDOM_PROCESSOR_WATTS, fitQuantity, requiredMemorySpeed, requiredProcessorSeries, requiredProcessorWatts } from '../../src/automation/component-engine';
 import { resolveConfigurationErrors } from '../../src/automation/configuration-errors';
 import { QuantityHandler } from '../../src/components/quantity-handler';
 import { menuSection, type FixtureRow } from './oca-menu-fixture';
@@ -136,14 +136,14 @@ test('reads "then Qty2 Processors must be selected" as a minimum and raises the 
 });
 
 test('reads the processor series an OCA rule requires (X = any digit)', () => {
-  const series = (text: string) => requiredProcessorSeries(text)?.pattern;
+  const series = (text: string) => requiredProcessorSeries(text)?.matches;
   const dl340 = series('Front 4xGPU Enable kit can be selected only if 6XX1P processor is selected');
   const dl320 = series("In 'SFF/EDSFF CTO server': Qty=3 of 4EDSFF BP Kit along with HPE DL320 G12 12EDSFF DA Cbl Kit can be selected only if 6XXX1P processor is selected");
   for (const pattern of [dl340!, dl320!, series('20EDSFF DA cbl kit is supported only with 6XX1P processor series')!]) {
-    expect(pattern.test('Intel Xeon 6521P 2.6GHz 24-core 225W Processor for HPE')).toBe(true);
-    expect(pattern.test('Intel Xeon 6741P 2.5GHz 48-core 300W Processor for HPE')).toBe(true);
-    expect(pattern.test('Intel Xeon 6520P 2.4GHz 24-core 210W Processor for HPE')).toBe(false);
-    expect(pattern.test('Intel Xeon 6710E 2.4GHz 64-core 205W Processor for HPE')).toBe(false);
+    expect(pattern('Intel Xeon 6521P 2.6GHz 24-core 225W Processor for HPE')).toBe(true);
+    expect(pattern('Intel Xeon 6741P 2.5GHz 48-core 300W Processor for HPE')).toBe(true);
+    expect(pattern('Intel Xeon 6520P 2.4GHz 24-core 210W Processor for HPE')).toBe(false);
+    expect(pattern('Intel Xeon 6710E 2.4GHz 64-core 205W Processor for HPE')).toBe(false);
   }
   expect(requiredProcessorSeries('Odd quantities of processor selection is not allowed.')).toBeNull();
   expect(requiredProcessorSeries('In 8SFFx1 U.3 Kit processor')).toBeNull();
@@ -173,3 +173,97 @@ for (const [model, text] of [
     await expect(page.locator('#item_tr_HOT-6761P_cpuX_cpus select')).toHaveValue('0');
   });
 }
+
+const errorRule = (text: string, links: Array<[string, string]>) => `<li class="message_li"><span class="error_message">${text}
+  (${links.map(([id, title]) => `<a class="err-lnk" id="${id}">${title}</a>`).join(', ')})</span></li>`;
+
+test('reads the memory speed and processor power OCA rules require', () => {
+  const memory = requiredMemorySpeed('Supports only PC5-4800B Memory.')!;
+  expect(memory.matches('HPE 64GB (1x64GB) Dual Rank x4 DDR5-4800 CAS-40-39-39 EC8 Registered Smart Memory Kit')).toBe(true);
+  expect(memory.matches('HPE 64GB (1x64GB) Dual Rank x4 DDR5-5600 CAS-46-45-45 EC8 Registered Smart FIO Memory Kit')).toBe(false);
+  const watts = requiredProcessorWatts('For 8LFF CTO Server OR SFF/EDSFF CTO Server: If Processor more than 240W and less than or equal to 500W is selected then Performance heat sink OR DLC Module must be selected.')!;
+  expect(watts.matches('AMD EPYC 9135 3.65GHz 16-core 200W Processor for HPE')).toBe(true);
+  expect(watts.matches('AMD EPYC 9845 2.1GHz 160-core 390W Processor for HPE')).toBe(false);
+  expect(watts.matches('HPE ProLiant DL3X5 Gen11 2U Standard Heat Sink Kit')).toBe(false);
+  expect(requiredMemorySpeed('Mixing of PC5-4800B Memory and PC5-5600B Memory is not allowed')).toBeNull();
+});
+
+// P55438-B21 (DL320 Gen11, 2026-10-19): OCA's processor supports only DDR5-4800 and random memory was DDR5-5600.
+test('replaces memory with the speed the processor supports, at the same quantity', async ({ page }) => {
+  const rule = errorRule('Supports only PC5-4800B Memory.', [['memX_slots', 'Memory'], ['cpuX_cpus', 'Processors']]);
+  await page.setContent(menuSection({ key: 'cpuX', title: 'Processor', choices: [
+    { id: 'cpuX_cpus', title: 'Processors', flagged: true, messages: rule, rows: [
+      { pid: 'CPU', description: 'Intel Xeon-Gold 5416S 2.0GHz 16-core 150W Processor for HPE', quantity: 1, select: [0, 1] }] },
+  ] }) + menuSection({ key: 'memX', title: 'Memory', collapsed: true, choices: [
+    { id: 'memX_slots', title: 'Memory', flagged: true, messages: rule, rows: [
+      { pid: 'FAST', description: 'HPE 64GB (1x64GB) Dual Rank x4 DDR5-5600 CAS-46-45-45 EC8 Registered Smart FIO Memory Kit', quantity: 2, select: [0, 1, 2] },
+      { pid: 'SLOW', description: 'HPE 32GB (1x32GB) Dual Rank x8 DDR5-4800 CAS-40-39-39 EC8 Registered Smart Memory Kit', select: [0, 1, 2] },
+    ] },
+  ] }));
+  await new ComponentEngine(page).satisfyRequiredSection('Processor');
+  await expect(page.locator('#item_tr_SLOW_memX_slots select')).toHaveValue('2');
+  await expect(page.locator('#item_tr_FAST_memX_slots select')).toHaveValue('0');
+  await expect(page.locator('#item_tr_CPU_cpuX_cpus select')).toHaveValue('1');
+});
+
+const heatsinkSection = (cpus: FixtureRow[], heatsinks: FixtureRow[], cpuRules: string, heatRules: string) => menuSection({
+  key: 'cpuX', title: 'Processor', choices: [
+    { id: 'cpuX_cpus', title: 'Processor', flagged: Boolean(cpuRules), messages: cpuRules || undefined, rows: cpus },
+    { id: 'cpuX_heat', title: 'Heatsink Kit', flagged: Boolean(heatRules), messages: heatRules || undefined, rows: heatsinks },
+  ],
+});
+
+// P81948-B21 (DL345 Gen12, 2026-10-18): OCA preselected a 390W processor; the Performance heat sink was unavailable.
+test('replaces a processor above the power an OCA rule allows', async ({ page }) => {
+  const rule = errorRule('For 8LFF CTO Server OR SFF/EDSFF CTO Server: If Processor more than 240W and less than or equal to 500W is selected then Performance heat sink OR DLC Module must be selected.',
+    [['cpuX_cpus', 'Processor'], ['cpuX_heat', 'Heatsink Kit']]);
+  await page.setContent(heatsinkSection([
+    { pid: 'HOT', description: 'AMD EPYC 9845 2.1GHz 160-core 390W Processor for HPE', quantity: 1, select: [0, 1] },
+    { pid: 'WARM', description: 'AMD EPYC 9535 2.4GHz 64-core 300W Processor for HPE', select: [0, 1] },
+    { pid: 'COOL', description: 'AMD EPYC 9135 3.65GHz 16-core 200W Processor for HPE', select: [0, 1] },
+  ], [
+    { pid: 'STD', description: 'HPE ProLiant DL3X5 Gen11 2U Standard Heat Sink Kit', quantity: 1, select: [0, 1] },
+    { pid: 'PERF', description: 'HPE ProLiant Compute DL345 Gen12 Performance Heat Sink Kit', unavailable: true, select: [0, 1] },
+  ], rule, rule));
+  await new ComponentEngine(page).satisfyRequiredSection('Processor');
+  await expect(page.locator('#item_tr_COOL_cpuX_cpus select')).toHaveValue('1');
+  await expect(page.locator('#item_tr_HOT_cpuX_cpus select')).toHaveValue('0');
+  await expect(page.locator('#item_tr_WARM_cpuX_cpus select')).toHaveValue('0');
+});
+
+// P72176-B21 (DL360 Gen12, 2026-10-18): the Smart Chassis added a High Performance heat sink beside the standard one.
+test('removes the extra heat sink when OCA says the processor and heat sink quantities must match', async ({ page }) => {
+  const match = errorRule('Quantity of Processor and Quantity of Heatsink must match.', [['cpuX_cpus', 'Processor'], ['cpuX_heat', 'Heatsink Kit']]);
+  const fans = errorRule('If Performance Heatsink is selected, then Standard fan cannot be selected.', [['cpuX_heat', 'Heatsink Kit'], ['fanX_fans', 'Power Cooling Options']])
+    + errorRule('If Performance Heatsink or DLC Module is selected, then Performance Fan must be selected and vice versa.', [['cpuX_heat', 'Heatsink Kit'], ['fanX_fans', 'Power Cooling Options']]);
+  await page.setContent(heatsinkSection(
+    [{ pid: 'CPU', description: 'Intel Xeon 6505P 2.2GHz 12-core 150W Processor for HPE', quantity: 1, select: [0, 1, 2] }],
+    [
+      { pid: 'STD', description: 'HPE ProLiant DL3X0 Gen11 1U Standard Heat Sink Kit', quantity: 1, select: [0, 1] },
+      { pid: 'PERF', description: 'HPE ProLiant Compute DL3XX Gen12 High Performance Heat Sink Kit', quantity: 1, select: [0, 1] },
+    ], match, match + fans));
+  await new ComponentEngine(page).satisfyRequiredSection('Processor');
+  await expect(page.locator('#item_tr_PERF_cpuX_heat select')).toHaveValue('0');
+  await expect(page.locator('#item_tr_STD_cpuX_heat select')).toHaveValue('1');
+  await expect(page.locator('#item_tr_CPU_cpuX_cpus select')).toHaveValue('1');
+});
+
+test('raises the heat sink when two processors stand against one heat sink', async ({ page }) => {
+  const match = errorRule('Quantity of Processor and Quantity of Heatsink must match.', [['cpuX_cpus', 'Processor'], ['cpuX_heat', 'Heatsink Kit']]);
+  await page.setContent(heatsinkSection(
+    [{ pid: 'CPU', description: 'Intel Xeon 6505P 2.2GHz 12-core 150W Processor for HPE', quantity: 2, select: [0, 1, 2] }],
+    [{ pid: 'STD', description: 'HPE ProLiant DL3X0 Gen11 1U Standard Heat Sink Kit', quantity: 1, select: [0, 1, 2] }], match, match));
+  await new ComponentEngine(page).satisfyRequiredSection('Processor');
+  await expect(page.locator('#item_tr_STD_cpuX_heat select')).toHaveValue('2');
+  await expect(page.locator('#item_tr_CPU_cpuX_cpus select')).toHaveValue('2');
+});
+
+// S8J34A (SimpliVity 325 Gen12, 2026-10-18): the Heatsink Kit choice was empty and flagged.
+test('fills an empty choice whose own rule asks for minimum one product', async ({ page }) => {
+  await page.setContent(heatsinkSection(
+    [{ pid: 'CPU', description: 'AMD EPYC 9135 3.65GHz 16-core 200W Processor for HPE', quantity: 1, select: [0, 1] }],
+    [{ pid: 'HEAT', description: 'HPE ProLiant DL3X5 Gen11 1U Standard Heat Sink Kit', select: [0, 1] }],
+    '', errorRule('Minimum one heatsink kit must be selected', [['cpuX_heat', 'Heatsink Kit']])));
+  await new ComponentEngine(page).satisfyRequiredSection('Processor');
+  await expect(page.locator('#item_tr_HEAT_cpuX_heat select')).toHaveValue('1');
+});

@@ -17,12 +17,18 @@ export class SupportServices {
   async select(preferredExperience?: string): Promise<SupportServiceSelection> {
     console.log('[STEP] Opening Services tab');
     const services = this.page.getByRole('link', { name: 'Services', exact: true }).filter({ visible: true }).first();
-    await expect(services).toBeVisible({ timeout: 60_000 });
-    await services.click({ force: true });
-    await waitForBlockingOverlay(this.page);
-
     const support = this.page.locator('#experience-and-term').filter({ visible: true }).first();
-    await expect(support.getByText('Support Services', { exact: true })).toBeVisible({ timeout: 60_000 });
+    const heading = support.getByText('Support Services', { exact: true });
+    // P73285-B21 (DL380 Gen12, 2026-10-18): the click came while OCA was still recalculating and the Menu
+    // stayed open for 60 s. The tab is clicked again when its panel has not appeared.
+    for (let attempt = 1; ; attempt += 1) {
+      await expect(services).toBeVisible({ timeout: 60_000 });
+      await services.click({ force: true });
+      await waitForBlockingOverlay(this.page);
+      if (await heading.waitFor({ state: 'visible', timeout: 20_000 }).then(() => true, () => false)) break;
+      if (attempt >= 3) await expect(heading, 'Support Services on the Services tab').toBeVisible({ timeout: 1_000 });
+      console.log(`[WARN] Services tab did not open (attempt ${attempt}/3); clicking it again`);
+    }
 
     const requestedExperience = preferredExperience && !/^(random|default)$/i.test(preferredExperience)
       ? preferredExperience.trim()

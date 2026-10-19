@@ -1,6 +1,7 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { env } from '../config/env';
 import { waitForBlockingOverlay } from '../core/waits';
+import { dismissOcaMessageDialogs, ocaProblemMessage } from '../core/oca-problem';
 import type { PageSnapshot } from '../reporting/html-capture';
 
 /** The configuration entry in OCA's BOM tab (OCA_EXPECTED_PAGE_TEXT, default 'OCA Config 2'). */
@@ -9,16 +10,7 @@ export const BOM_CONFIG_NAME = env.expectedPageText;
 export class BillingTier {
   constructor(private readonly page: Page, private readonly snapshot?: PageSnapshot) {}
   async run(): Promise<void> {
-    const bom = this.page.getByRole('link', { name: 'BOM', exact: true }).filter({ visible: true }).first();
-    await expect(bom).toBeVisible({ timeout: 60_000 }); await bom.click(); await waitForBlockingOverlay(this.page);
-    const ocaConfig2 = this.page.locator('#eo_nav_li_0').filter({ visible: true }).first();
-    await expect(ocaConfig2).toContainText(BOM_CONFIG_NAME, { timeout: 60_000 });
-    console.log(`[STEP] Selecting ${BOM_CONFIG_NAME} in BOM`);
-    await ocaConfig2.click({ force: true });
-    await waitForBlockingOverlay(this.page);
-    const setup = this.page.getByText('Billing Tier Setup', { exact: false }).filter({ visible: true }).first()
-      .or(this.page.locator('#obw_billingtier_bot').filter({ visible: true })).first();
-    await expect(setup).toBeVisible({ timeout: 60_000 }); await setup.click();
+    await this.openBillingTierSetup();
     const dialog = this.page.locator('.ui-dialog, [role="dialog"]')
       .filter({ visible: true, hasText: /Billing Tier Setup/i }).last();
     await expect(dialog, 'Billing Tier Setup dialog').toBeVisible({ timeout: 60_000 });
@@ -35,6 +27,42 @@ export class BillingTier {
     await this.page.locator('.ui-widget-overlay.ui-front, .ui-widget-overlay')
       .waitFor({ state: 'hidden', timeout: 60_000 });
     await waitForBlockingOverlay(this.page);
+  }
+
+  /**
+   * Opens the BOM tab, selects the configuration and clicks Billing Tier Setup. On DL320 Gen11
+   * (P52765-B21, S2G17A, 2026-10-19) OCA answered the selection with its problem dialog ("Widget does
+   * not exist on current page: extended_overview:bom:bom_tab"), whose overlay blocked the click for
+   * 30 s. The dialog is closed and the BOM tab opened once more.
+   */
+  private async openBillingTierSetup(): Promise<void> {
+    for (let attempt = 1; ; attempt += 1) {
+      const bom = this.page.getByRole('link', { name: 'BOM', exact: true }).filter({ visible: true }).first();
+      await expect(bom).toBeVisible({ timeout: 60_000 }); await bom.click(); await waitForBlockingOverlay(this.page);
+      const ocaConfig2 = this.page.locator('#eo_nav_li_0').filter({ visible: true }).first();
+      await expect(ocaConfig2).toContainText(BOM_CONFIG_NAME, { timeout: 60_000 });
+      console.log(`[STEP] Selecting ${BOM_CONFIG_NAME} in BOM`);
+      await ocaConfig2.click({ force: true });
+      await waitForBlockingOverlay(this.page);
+      const setup = this.page.getByText('Billing Tier Setup', { exact: false }).filter({ visible: true }).first()
+        .or(this.page.locator('#obw_billingtier_bot').filter({ visible: true })).first();
+      let problem = await ocaProblemMessage(this.page);
+      if (!problem) {
+        try {
+          await expect(setup).toBeVisible({ timeout: 60_000 });
+          await setup.click({ timeout: 30_000 });
+          return;
+        } catch (error) {
+          // The dialog can open after the overlay wait, while the click is being retried.
+          problem = await ocaProblemMessage(this.page);
+          if (!problem) throw error;
+        }
+      }
+      if (attempt >= 2) throw new Error(`OCA could not open the BOM tab: ${problem}`);
+      console.log(`[WARN] OCA error while opening the BOM tab (${problem}); closing it and opening BOM again`);
+      await dismissOcaMessageDialogs(this.page);
+      await waitForBlockingOverlay(this.page);
+    }
   }
 
   /** OCA keeps OK disabled (class billingtier-disabled) until required entries are made. */

@@ -85,17 +85,54 @@ export function mentionsProduct(text: string, productNumber: string): boolean {
   return new RegExp(`(^|[^A-Za-z0-9])${escapeRegex(productNumber)}(?![A-Za-z0-9-])`, 'i').test(text);
 }
 
+/** A kind of product an OCA rule requires, with a test on product descriptions. */
+export interface RequiredKind { name: string; matches: (description: string) => boolean }
+
+/** The power in a processor description ("... 24-core 225W Processor for HPE"), or NaN. */
+export function processorWatts(description: string): number {
+  return Number(description.match(/(\d+)\s*W\b/i)?.[1]);
+}
+
+/**
+ * The processor power an OCA rule limits: "If Processor more than 240W and less than or equal to 500W is
+ * selected then Performance heat sink OR DLC Module must be selected" (P81948-B21, DL345 Gen12). OCA had
+ * preselected a 390W processor and its Performance heat sink was unavailable; a processor of at most
+ * 240W needs neither.
+ */
+export function requiredProcessorWatts(text: string): RequiredKind | null {
+  const limit = Number(text.match(/\bprocessors?\s+(?:more|greater)\s+than\s+(\d+)\s*W\b/i)?.[1]);
+  if (!limit) return null;
+  return { name: `a processor of at most ${limit}W`, matches: (description) => processorWatts(description) <= limit };
+}
+
+/** The kind of product a rule requires, if it names one. */
+export function requiredKind(text: string): RequiredKind | null {
+  return requiredProcessorSeries(text) ?? requiredMemorySpeed(text) ?? requiredProcessorWatts(text);
+}
+
 /**
  * The processor series an OCA rule requires: "20EDSFF DA cbl kit ... is supported only with 6XX1P
  * processor series" (P75217-B21, DL320 Gen12) or "Front 4xGPU Enable kit can be selected only if 6XX1P
  * processor is selected" (P75728-B21, DL340 Gen12). X stands for a digit, so 6XX1P matches "Intel Xeon
  * 6521P". OCA also writes "6XXX1P" for the same series, so a run of Xs matches up to that many digits.
  */
-export function requiredProcessorSeries(text: string): { name: string; pattern: RegExp } | null {
+export function requiredProcessorSeries(text: string): RequiredKind | null {
   const name = text.match(/\b(\d*X+[\dX]*[A-Z]*)\s+processors?\b/)?.[1];
   if (!name || !/\d/.test(name)) return null;
   const source = name.replace(/X+/g, (run) => `\\d{1,${run.length}}`);
-  return { name, pattern: new RegExp(`\\b${source}\\b`) };
+  const pattern = new RegExp(`\\b${source}\\b`);
+  return { name: `a ${name} processor`, matches: (description) => pattern.test(description) };
+}
+
+/**
+ * The memory speed an OCA rule requires: "Supports only PC5-4800B Memory." (P55438-B21, DL320 Gen11).
+ * OCA's memory descriptions give the speed as "DDR5-4800", so PC5-4800B matches DDR5-4800 kits.
+ */
+export function requiredMemorySpeed(text: string): RequiredKind | null {
+  const match = text.match(/\bsupports?\s+only\s+(?:PC|DDR)(\d)-(\d{4})[A-Z]?\s+memory\b/i);
+  if (!match) return null;
+  const pattern = new RegExp(`\\bDDR${match[1]}-${match[2]}\\b`, 'i');
+  return { name: `DDR${match[1]}-${match[2]} memory`, matches: (description) => pattern.test(description) };
 }
 
 /** Blank and filler kits are never chosen at random. */
@@ -568,7 +605,11 @@ export class ComponentEngine {
         source = `the products matching OCA's message (${[...ruleWords].join(' ')})`;
       }
     }
-    if (!candidates.size && allowUnnamed) {
+    // "Minimum one heatsink kit must be selected (Heatsink Kit)" (S8J34A, SimpliVity 325 Gen12): the
+    // choice's own rule asks for any one of its products.
+    const ownMinimum = rules.some((rule) => rule.targets.length === 1 && rule.targets[0] === choice.id
+      && /\b(?:minimum|min|at[- ]least)\s*=?\s*(?:one|1)\b.*?\bmust be selected\b/i.test(rule.text));
+    if (!candidates.size && (allowUnnamed || ownMinimum)) {
       for (const row of await this.rowInfo(this.choiceRows(choice.id))) if (isPickable(row)) candidates.set(row.id, { ...row, choiceId: choice.id });
       source = 'its available products';
     }
@@ -591,8 +632,8 @@ export class ComponentEngine {
   private async repairGroupRule(choice: MenuChoice): Promise<boolean> {
     for (const rule of await this.choiceRules(choice.id)) {
       // "Qty=3 of 4EDSFF BP Kit ... only if 6XXX1P processor is selected" counts BP kits, not processors:
-      // it raised the processor to 3 twelve times (P75217-B21). repairSeriesRule handles it.
-      if (rule.targets.length < 2 || requiredProcessorSeries(rule.ownText)) continue;
+      // it raised the processor to 3 twelve times (P75217-B21). repairRequiredKindRule handles it.
+      if (rule.targets.length < 2 || requiredKind(rule.ownText)) continue;
       const ruleWords = new Set(titleWords(rule.ownText));
       const titles = await this.page.evaluate((ids) => ids.map((id) =>
         (document.getElementById(`choice_title_${id}`)?.textContent ?? '').replace(/\s+/g, ' ').trim()), rule.targets);
@@ -689,31 +730,75 @@ export class ComponentEngine {
   }
 
   /**
-   * A rule needs a processor series the selected processor is not: on P75728-B21 (DL340 Gen12) the random
-   * Smart Chassis brought a Front 4xGPU kit that "can be selected only if 6XX1P processor is selected",
-   * while OCA's preselected processor was kept. A processor of that series is selected with the same
-   * quantity, then the old one is removed (a radio row replaces it by itself).
+   * A rule needs a kind of product the current selection is not: a processor series (P75728-B21, DL340
+   * Gen12: the random Smart Chassis brought a Front 4xGPU kit that "can be selected only if 6XX1P processor
+   * is selected", while OCA's preselected processor was kept) or a memory speed (P55438-B21, DL320 Gen11:
+   * "Supports only PC5-4800B Memory. (Memory, Processors)" with DDR5-5600 memory). In each choice the rule
+   * covers, a product of that kind is selected with the same quantity, then the old one is removed (a
+   * radio row replaces it by itself).
    */
-  private async repairSeriesRule(choice: MenuChoice): Promise<boolean> {
-    const existing = await this.existingSelection(choice.id);
+  private async repairRequiredKindRule(choice: MenuChoice): Promise<boolean> {
     for (const rule of await this.choiceRules(choice.id)) {
-      const series = requiredProcessorSeries(rule.ownText);
-      if (!series || (existing && series.pattern.test(existing.description))) continue;
-      const rows = (await this.rowInfo(this.choiceRows(choice.id)))
-        .filter((row) => isPickable(row) && row.id !== existing?.rowId && series.pattern.test(row.description));
-      if (!rows.length) continue;
-      const withinWatts = rows.filter((row) => !(Number(row.description.match(/(\d+)\s*W\b/i)?.[1]) > MAX_RANDOM_PROCESSOR_WATTS));
-      const candidates = withinWatts.length ? withinWatts : rows;
-      console.log(`[STEP] OCA rule "${rule.ownText}" needs a ${series.name} processor`
-        + `${existing ? ` (${existing.productNumber} is not)` : ''}: ${candidates.map((row) => row.productNumber).join(', ')}`);
-      await this.fillOne(choice.title || choice.id, candidates.map((row) => ({ ...row, choiceId: choice.id })), existing?.quantity ?? 1);
-      if (existing) {
-        const old = this.page.locator(`[id=${JSON.stringify(existing.rowId)}]`);
-        if (Number(await this.quantities.committedQuantity(old, existing.productNumber)) > 0) {
-          console.log(`[STEP] Removing ${existing.productNumber}, which is not a ${series.name} processor`);
-          await this.quantities.set(old, existing.productNumber, 0, false);
+      const kind = requiredKind(rule.ownText);
+      if (!kind) continue;
+      const targets = [...new Set([choice.id, ...rule.targets])];
+      await this.openOwners(targets);
+      for (const target of targets) {
+        const existing = await this.existingSelection(target);
+        if (existing && kind.matches(existing.description)) continue;
+        const rows = (await this.rowInfo(this.choiceRows(target)))
+          .filter((row) => isPickable(row) && row.id !== existing?.rowId && kind.matches(row.description));
+        if (!rows.length) continue;
+        const withinWatts = rows.filter((row) => !(processorWatts(row.description) > MAX_RANDOM_PROCESSOR_WATTS));
+        const candidates = withinWatts.length ? withinWatts : rows;
+        console.log(`[STEP] OCA rule "${rule.ownText}" needs ${kind.name}`
+          + `${existing ? ` (${existing.productNumber} is not)` : ''}: ${candidates.map((row) => row.productNumber).join(', ')}`);
+        await this.fillOne(target, candidates.map((row) => ({ ...row, choiceId: target })), existing?.quantity ?? 1);
+        if (existing) {
+          const old = this.page.locator(`[id=${JSON.stringify(existing.rowId)}]`);
+          if (Number(await this.quantities.committedQuantity(old, existing.productNumber)) > 0) {
+            console.log(`[STEP] Removing ${existing.productNumber}, which is not ${kind.name}`);
+            await this.quantities.set(old, existing.productNumber, 0, false);
+          }
         }
+        return true;
       }
+    }
+    return false;
+  }
+
+  /**
+   * "Quantity of Processor and Quantity of Heatsink must match. (Processor, Heatsink Kit)" (P72176-B21,
+   * DL360 Gen12): the random Smart Chassis added a High Performance heat sink beside OCA's standard one,
+   * so two heat sinks stood against one processor. When the larger side has several products, the one
+   * the choice's other error rules speak of most ("If Performance Heatsink is selected, then Standard fan
+   * cannot be selected") is removed; when both sides hold one product, the smaller quantity is raised.
+   */
+  private async repairMatchRule(choice: MenuChoice): Promise<boolean> {
+    const rules = await this.choiceRules(choice.id);
+    for (const rule of rules) {
+      if (rule.targets.length !== 2 || !/\bquantity of \b.+?\band quantity of \b.+?\bmust match\b/i.test(rule.ownText)) continue;
+      await this.openOwners(rule.targets);
+      const sides = await Promise.all(rule.targets.map(async (id) => {
+        const rows = (await this.rowInfo(this.choiceRows(id)))
+          .filter((row) => row.productNumber && this.committedQuantity(row) > 0 && !isDimmBlank(row.description));
+        return { id, rows, total: rows.reduce((sum, row) => sum + this.committedQuantity(row), 0) };
+      }));
+      const [low, high] = [...sides].sort((a, b) => a.total - b.total);
+      if (!low.total || low.total === high.total) continue;
+      if (high.rows.length > 1) {
+        const others = (await this.choiceRules(high.id)).filter((other) => other.text !== rule.text).map((other) => other.ownText).join(' ');
+        const extra = high.rows.filter((row) => this.committedQuantity(row) <= high.total - low.total)
+          .sort((a, b) => phraseScore(others, b.description) - phraseScore(others, a.description))[0];
+        if (!extra) continue;
+        console.log(`[STEP] OCA rule "${rule.ownText}": ${high.total} against ${low.total}; removing ${extra.productNumber}`);
+        await this.quantities.set(this.page.locator(`[id=${JSON.stringify(extra.id)}]`), extra.productNumber, 0, false);
+        return true;
+      }
+      if (low.rows.length !== 1) continue;
+      const [row] = low.rows;
+      console.log(`[STEP] OCA rule "${rule.ownText}": raising ${row.productNumber} from ${low.total} to ${high.total}`);
+      await this.quantities.set(this.page.locator(`[id=${JSON.stringify(row.id)}]`), row.productNumber, high.total, false, { acceptOffered: true });
       return true;
     }
     return false;
@@ -906,7 +991,10 @@ export class ComponentEngine {
       if (await this.repairMaxRule(choice)) return;
     }
     for (const choice of flagged) {
-      if (await this.repairSeriesRule(choice)) return;
+      if (await this.repairRequiredKindRule(choice)) return;
+    }
+    for (const choice of flagged) {
+      if (await this.repairMatchRule(choice)) return;
     }
     for (const choice of flagged) {
       if (await this.repairFlaggedChoice(choice, !randomized)) return;
