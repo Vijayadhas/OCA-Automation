@@ -57,8 +57,9 @@ Repository: https://github.com/Vijayadhas/OCA-Automation (branch `main`).
   structure (section header → choice title → item rows). A section a model doesn't offer is skipped.
 - **After every change:** list every added or modified file (the user may copy files by hand), and
   add a row to the change log in `docs/DEVELOPMENT_WORKFLOW.md`.
-- **Git:** the user has asked for commits, pushes to `main`, and branch deletions explicitly. Commit
-  or push only when asked.
+- **Git (since 2026-10-20):** when a piece of work is complete and verified (typecheck, lint, affected
+  specs pass, change-log row added), commit and push it to `main` straight away, without waiting to
+  be asked, then tell the user to download the zip again. Branch deletions still need approval.
 - Never commit captures, `output/`, `.oca-ui/`, `.oca-profile/`, or `.oca-local.json`. Captures
   contain customer configuration data.
 
