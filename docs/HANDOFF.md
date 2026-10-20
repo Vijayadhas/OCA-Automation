@@ -20,15 +20,28 @@ Excel-driven Playwright (TypeScript) automation for HPE One Config Advanced (OCA
 row in an Excel workbook it:
 
 1. Opens OCA in a persistent Chromium profile (the user signs in manually once).
-2. Selects **aaS** mode on the landing page (mandatory).
-3. Searches the exact CTO model number and clicks **Customize** (Integration Rack: blank →
-   Standard/Standalone).
+2. Selects **aaS** mode on the landing page (mandatory), then the **Country** (Excel `Country`,
+   blank = UNITED STATES) and the Advanced Settings **Customer Account** (Nutanix models: Nutanix).
+3. Searches the model number (or a search word plus Model Description) and clicks **Customize**
+   (Integration Rack: blank → Standard/Standalone). Solutions open their Wizard card.
+   - **Server / Nutanix:** Menu tab, steps 4-5.
+   - **Solution:** Solution Wizard (dHCI: solution type, server, server model, Server Qty within the
+     wizard's Min/Max, adapter, switch), the solution Menu (Node Chassis, Node, Capacity, DAC Cables),
+     then each server inside the solution from OCA's navigation tree, configured like a server.
+   - **Storage:** storage flow (Capacity etc.).
 4. Turns off "HPE Recommended only", then sets components in order: Processor, Memory, Smart
    Chassis, Power Supplies. Each is either the Excel value or a **random** pick.
 5. Repairs any section OCA still flags with an error (required selections and quantity rules).
 6. Picks Support Services, opens the BOM tab and Billing Tier Setup, saves, and captures the UCID.
 7. Optionally generates and associates the End BOM and reads Start/End BOM capacity.
-8. Writes each result straight away to `<input>-results.xlsx`.
+8. Writes each result straight away to `<input>-results.xlsx` (dashboard: results table, Start/End BOM
+   UCID columns, "BOM UCIDs" sheet).
+
+Inputs: the Excel template (`input/OCA-Input-Template.xlsx`, `npm run template:excel`, or the dashboard's
+"Download Excel template") has one row per model: Job ID, Model Number, Model Type (Server / Solution /
+Storage / Nutanix), Model Description, Customer Account, Country, Service Type, Server, Integration Rack,
+Solution Name, Generate End BOM, Enabled. Rows JOB-001 to JOB-012 are models already run; JOB-013 is
+the Arcus solution still to verify.
 
 Entry points: `npm run oca` (CLI, `src/main.ts`) and `npm run ui` (web dashboard on port 4173,
 `src/app/ui-server.ts`). On Windows the user runs `Run-OCA.cmd` / `Run-OCA-UI.cmd`.
@@ -170,14 +183,19 @@ opened through OCA's configuration dropdown). The tracker also lists ML350 Gen12
    split it into its own billing tier.
 
 **Gaps (not automated yet):** growth factor (left at OCA's default), End BOM × factor check, compute
-unit check, Summary-tab End BOM check, Save-blocked negative test, region choice, Synergy multi-level
-configuration. Selectors for these need captured HTML first (CLAUDE.md): the Growth options table of
+unit check, Summary-tab End BOM check, Save-blocked negative test, Synergy multi-level
+configuration. (Region/country choice is done since 2026-10-20: the Country field.) Selectors for
+these need captured HTML first (CLAUDE.md): the Growth options table of
 End BOM Setup from two models; for Synergy, the configuration dropdown and a compute-module Menu page.
 
 ## 6. Current state (2026-10-20)
 
-- `main` holds the fixes of 2026-10-20 (rows 38-40, 42-43 above) together with this document.
-  Before that, `d6ed8b2` (2026-10-19) and `eb234d6` (2026-10-18).
+- Commits of 2026-10-20 on `main`: `10cadd3` rule repairs (rows 38-40, 42-43), `a9aeefd` dashboard
+  **Share (zip)** button, `a988b78` Country field and Arcus solution (row 46), then this document.
+  Before that, `d6ed8b2` (2026-10-19) and `eb234d6` (2026-10-18). Check `git log` for later ones.
+- New model to verify: the **Arcus** solution (S3V83A, "HPE GreenLake for PC3000 with Alletra Storage
+  MP (Block)") configured in **Saudi Arabia**, template row JOB-013. Built from the user's Playwright
+  recording only; the Country step and the DL360 Gen12 server inside the solution are not yet run on OCA.
 - Run results so far, by family (each family is one batch of 4-14 models):
   - Confirmed working end to end on OCA: DL360/DL320/DL340/DL380 Gen12 servers, DL580 Gen12
     (P75399-B21), S3V83A (dHCI solution with its server), S2U63A (Data Solutions),
@@ -227,4 +245,5 @@ npm run ui        # dashboard at http://localhost:4173
 ```
 
 Useful environment variables: `OCA_BASE_URL`, `OCA_AUTH_WAIT_MS`, `OCA_MAX_RANDOM_CPU_WATTS`
-(default 270), `OCA_MODEL_ATTEMPTS` (default 1 = no automatic retry, since 2026-10-15; old name `OCA_RULE_CONFLICT_ATTEMPTS`), `OCA_MANUAL_BILLING_CAPACITY` (default 1; storage Billing Tier "Written Usable TiB"), `OCA_UI_PORT`.
+(default 270), `OCA_MODEL_ATTEMPTS` (default 1 = no automatic retry, since 2026-10-15; old name `OCA_RULE_CONFLICT_ATTEMPTS`), `OCA_MANUAL_BILLING_CAPACITY` (default 1; storage Billing Tier "Written Usable TiB"),
+`OCA_DEFAULT_COUNTRY` (default UNITED STATES; used when a model's Country is blank), `OCA_UI_PORT`.
