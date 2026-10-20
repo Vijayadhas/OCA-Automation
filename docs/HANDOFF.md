@@ -43,9 +43,10 @@ Repository: https://github.com/Vijayadhas/OCA-Automation (branch `main`).
   `D:\KES Doc new\END BOM Oct\OCA-Automation-main\OCA-Automation-main`. That copy is a GitHub zip
   download (no Git), so the log's version line shows the newest source file time, which is the
   commit time in US Pacific time (e.g. commit `d6ed8b2` 2026-10-19 09:26 IST shows as 2026-10-18 20:56).
-- **The loop:** the user runs a batch from the dashboard → sends one zip per server family holding
-  the copied log (`New Text Document.txt`) and the captures (`<Job ID>/NN-<step>.html` and
-  `.frame1.html`) → Claude finds the cause, fixes it generically, runs only the affected unit specs,
+- **The loop:** the user runs a batch from the dashboard → sends one zip per batch. Since
+  2026-10-20 the dashboard's **Share (zip)** button builds it (`activity.log`, `input.xlsx`,
+  `output/input-results.xlsx`, `output/html/<Job ID>/NN-<step>.html` and `.frame1.html`, traces);
+  older zips hold the copied log as `New Text Document.txt` beside the captures → Claude finds the cause, fixes it generically, runs only the affected unit specs,
   adds a change-log row → the user asks to commit and push, downloads the zip again and re-runs the
   failed models.
 - **Selectors only from captured HTML.** Never invent selectors or page structure; ask for HTML if

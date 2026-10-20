@@ -10,6 +10,7 @@ import { ExcelValidator } from '../excel/excel-validator';
 import { buildInputTemplate } from '../excel/input-template';
 import type { OcaJob } from '../models/job';
 import { prepareRunJobs, writeRunWorkbook } from './run-workbook';
+import { zipDirectory } from './zip';
 
 type RunState = {
   id: string;
@@ -230,6 +231,35 @@ app.get('/api/runs/:id/download', (req, res) => {
   const run = runs.get(req.params.id);
   if (!run?.resultPath || !fs.existsSync(run.resultPath)) return res.status(404).json({ error: 'Results are not available yet.' });
   return res.download(run.resultPath, `oca-results-${run.id.slice(0, 8)}.xlsx`);
+});
+
+/**
+ * Everything needed to look into a run, in one zip that opens into one folder: the Activity log
+ * (activity.log, with the code version line), the input workbook, the results workbook, the HTML
+ * captures (output/html/<Job ID>/) and any traces. Works for earlier runs too, as long as their
+ * folder under .oca-ui/runs is still there (id "latest" takes the newest).
+ */
+app.get('/api/runs/:id/share', (req, res) => {
+  // "latest": the newest run folder, for a dashboard page reloaded after its run.
+  const id = req.params.id === 'latest'
+    ? fs.readdirSync(dataRoot).filter((name) => /^[0-9a-f-]{36}$/i.test(name))
+      .sort((a, b) => fs.statSync(path.join(dataRoot, b)).mtimeMs - fs.statSync(path.join(dataRoot, a)).mtimeMs)[0] ?? ''
+    : req.params.id;
+  const runDir = path.join(dataRoot, id);
+  if (!/^[0-9a-f-]{36}$/i.test(id) || !fs.existsSync(runDir)) return res.status(404).json({ error: 'Run folder not found.' });
+  const run = runs.get(id);
+  if (run && !fs.existsSync(path.join(runDir, 'activity.log'))) fs.writeFileSync(path.join(runDir, 'activity.log'), `${run.logs.join('\n')}\n`, 'utf8');
+  const started = run ? new Date(run.startedAt) : fs.statSync(runDir).birthtime;
+  const stamp = `${started.getFullYear()}-${String(started.getMonth() + 1).padStart(2, '0')}-${String(started.getDate()).padStart(2, '0')}`
+    + `_${String(started.getHours()).padStart(2, '0')}${String(started.getMinutes()).padStart(2, '0')}`;
+  const folder = `OCA-run-${stamp}-${id.slice(0, 8)}`;
+  try {
+    const zip = zipDirectory(runDir, folder);
+    res.setHeader('Content-Disposition', `attachment; filename="${folder}.zip"`);
+    return res.type('application/zip').send(zip);
+  } catch (error) {
+    return res.status(500).json({ error: `Could not build the zip: ${error instanceof Error ? error.message : String(error)}` });
+  }
 });
 
 app.listen(port, () => console.log(`OCA Control Center: http://localhost:${port}`));
