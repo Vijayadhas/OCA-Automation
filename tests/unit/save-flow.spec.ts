@@ -54,3 +54,17 @@ test('runs Save once more when the dialog closed but OCA still shows TempUCID', 
       if (window.saved) header.textContent = 'UCID 5157328606-01'; window.saved = true;">Save</button></div>`);
   expect(await new SaveFlow(page, { confirmationTimeoutMs: 500 }).save()).toEqual({ ucid: '5157328606-01', status: 'Saved' });
 });
+
+// P54205-B21 (DL345 Gen11, 2026-10-19): the rerun of Save got OCA's "no permission to edit" Warning.
+test('chooses Save As New Configuration when OCA cannot edit the configuration', async ({ page }) => {
+  await page.setContent(`<div id="header">UCID TempUCID</div>
+    <button id="save_icon" onclick="document.querySelector('#save-item').style.display='block'">Save</button>
+    <button id="save-item" style="display:none" onclick="warn.style.display='block'">Save OCA Config 2</button>
+    <div id="warn" class="ui-dialog" role="dialog" style="display:none"><span class="ui-dialog-title">Warning</span>
+      <div>You have no permission to edit the configuration. You can save as new version or save as new configuration.</div>
+      <button>Cancel</button><button>Save As New Version</button>
+      <button onclick="warn.style.display='none'; dialog.style.display='block'">Save As New Configuration</button></div>
+    <div id="dialog" class="ui-dialog" style="display:none"><button id="save_btn"
+      onclick="dialog.style.display='none'; header.textContent = 'UCID 5157328606-01'">Save</button></div>`);
+  expect(await new SaveFlow(page, { confirmationTimeoutMs: 500 }).save()).toEqual({ ucid: '5157328606-01', status: 'Saved' });
+});

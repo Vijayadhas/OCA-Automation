@@ -1,11 +1,20 @@
 # OCA Automation — Handoff for a new Claude session
 
 Read this first, then `CLAUDE.md`, `README.md`, and the change log at the end of
-`docs/DEVELOPMENT_WORKFLOW.md`. Written 2026-10-14 so a Claude Code session on another server can
-continue without the earlier chat history. The user will be working from a phone for the next few
-days, so keep replies short and put the important result first.
+`docs/DEVELOPMENT_WORKFLOW.md`. Written 2026-10-14, last updated 2026-10-20, so a Claude Code
+session on another server can continue without the earlier chat history. Keep replies short and put
+the important result first.
 
 ## 1. What the project is
+
+**Main objective:** for every CTO model the QA team lists (servers, solutions, storage, Nutanix), build
+a valid aaS configuration in OCA without manual work, save it (Start BOM UCID), and generate and
+associate its End BOM (End BOM UCID), so the team's tracker of Start/End BOM UCIDs fills itself. A
+model that OCA itself cannot build must be reported with OCA's own reason, never hidden.
+
+**Mandatory parts (project lead, 2026-10-15):** Processor, Memory and Support Services. Only error
+icons in Processor and Memory block a model; red icons elsewhere are left to OCA. The other component
+choices are random unless the Excel names them.
 
 Excel-driven Playwright (TypeScript) automation for HPE One Config Advanced (OCA). For each enabled
 row in an Excel workbook it:
@@ -28,14 +37,17 @@ Repository: https://github.com/Vijayadhas/OCA-Automation (branch `main`).
 
 ## 2. How the user works (important)
 
-- **Two machines.** Code is written on the development machine, which has no OCA access and no
-  Node.js. It is run on a separate run system, which has OCA, Node.js, and Chromium. The run system
-  path seen in logs is `D:\KES Doc new\END BOM Oct\OCA-Automation-main\OCA-Automation-main`.
-  If this new server has Node.js, `npm run typecheck` and `npm run test:unit` can be run here. OCA
-  itself is still only reachable from the run system.
-- **The loop:** the user runs a job → pastes the terminal log and/or sends a zip of the failure
-  HTML captures (`output/html/<Job ID>/NN-FAILED-<step>.html`) → Claude finds the cause, fixes it,
-  adds a unit test, adds a change-log row → the user pulls and runs again.
+- **Two machines.** Code is written on the development machine, which has no OCA access (Node.js 24
+  is installed there since 2026-10-15, so typecheck and unit tests run there). It is run on a
+  separate run system, which has OCA, Node.js, and Chromium. The run system path seen in logs is
+  `D:\KES Doc new\END BOM Oct\OCA-Automation-main\OCA-Automation-main`. That copy is a GitHub zip
+  download (no Git), so the log's version line shows the newest source file time, which is the
+  commit time in US Pacific time (e.g. commit `d6ed8b2` 2026-10-19 09:26 IST shows as 2026-10-18 20:56).
+- **The loop:** the user runs a batch from the dashboard → sends one zip per server family holding
+  the copied log (`New Text Document.txt`) and the captures (`<Job ID>/NN-<step>.html` and
+  `.frame1.html`) → Claude finds the cause, fixes it generically, runs only the affected unit specs,
+  adds a change-log row → the user asks to commit and push, downloads the zip again and re-runs the
+  failed models.
 - **Selectors only from captured HTML.** Never invent selectors or page structure; ask for HTML if
   it is missing. Failure captures are written automatically. `--capture-html` (or the dashboard
   checkbox) saves one after every step.
@@ -102,6 +114,24 @@ Main code: `src/automation/component-engine.ts` (`ComponentEngine`),
 | 25 | Requirements (2026-10-15): Processor, Memory, Support Services mandatory; no automatic retry for now | Missing selection fails the model before Save (`MandatorySelectionError`); `OCA_MODEL_ATTEMPTS` defaults to 1 |
 | 26 | Solution models never set Processor/Memory (S3V83A: they belong to the server inside the solution) | After the Solution Wizard, each "<server> #n" configuration from the full navigation is opened and configured like a server, with the mandatory check (`ConfigurationNavigation`) |
 | 27 | Results: Start/End BOM UCIDs hard to find; model route only by Yes/No columns | Dashboard UCID columns and a "BOM UCIDs" sheet; `Model Type` input (Server/Solution/Storage) |
+| 28 | Every OCA red icon was repaired, so unrelated sections (Storage, Networking) failed models (P75399-B21) | Only Processor and Memory icons are repaired and block Services; others are logged and left |
+| 29 | Nutanix models need Customer Account "Nutanix" and the Nutanix search result | `Model Type = Nutanix`; `CustomerAccount` types the account into OCA's dropdown; `__name` inside `evaluate` code is checked by `browser-callbacks.spec.ts` |
+| 30 | OCA's quantity menu measures 0x0, so options were never read; memory menus skip 1 (0/8/16...) | `QuantityHandler.menuNear` reads the menu nearest the clicked row from the DOM; the smallest offered quantity is used |
+| 31 | A DIMM Blank Kit counted as memory | Blank kits never count as a selection |
+| 32 | OCA stuck on its "Loading..." screen after sign-in | OCA is reloaded once before failing |
+| 33 | Max/requires rules: "Max=1 8SFF cable kit is allowed", "NS204i-u Cbl kit requires selection of NS204i-u Ht Plg Boot Opt Dev" | `repairMaxRule` removes the extra; `repairRequiresRule` matches OCA's abbreviations (`phraseScore`); a repair that newly flags Processor/Memory is undone |
+| 34 | Smart Chassis kits "supported only with 6XX1P processor series" while OCA's processor was another series (P75217-B21, P75728-B21) | `repairRequiredKindRule`: the processor is swapped for one of that series (X = digit) at the same quantity |
+| 35 | "Supports only PC5-4800B Memory" with DDR5-5600 (P55438-B21); "If Processor more than 240W ... Performance heat sink" with the heat sink unavailable (P81948-B21) | Same repair: memory swapped to DDR5-4800; processor swapped for one within the wattage |
+| 36 | Models with no Processor section (DL110 Gen12 P86628-B21, Cohesity/Veeam S-models) failed the mandatory check | Logged as part of the base server and passed |
+| 37 | Heat sink quantity rules: "Quantity of Processor and Quantity of Heatsink must match / must be equal" | `repairMatchRule` removes the extra product or raises the lone smaller side |
+| 38 | OCA's own base held conflicting products: "Mixing of Standard and Performance Heatsink is NOT allowed", "Supported with 8SFF CTO Model Only", "If A is selected, then B cannot be selected" (P53934-B21) | `repairConflictRule` (2026-10-20): each rule blames the products its links name; the most-blamed one is removed when its choice keeps another product; runs before the match repair |
+| 39 | Rules on Processor/Memory asking for another product: "then 7 Qty of Standard Fan Kit must be selected" (P54960-B21), "then High Performance Fan Kit must be selected" (P55432-B21) | `repairRequiresRule` also reads "then [N Qty of] X must be selected" and adds or raises that product (2026-10-20) |
+| 40 | More quantity wordings: "then 2 Processor must be selected" over several choices (P67161-B21), "Minimum 2 Processor must be selected", "Minimum 2 Heat sink is required", "Total memory capacity must total 256GB or higher" (P52536-B21) | Read by `quantityRule` (2026-10-20); an empty choice with "Minimum N ... is required" is filled |
+| 41 | BOM tab: OCA's problem dialog "Widget does not exist on current page: extended_overview:bom:bom_tab" | The dialog is closed and BOM opened once more |
+| 42 | Save: the header still read "UCID TempUCID" and was taken as saved (P73282-B21); on the rerun OCA said "You have no permission to edit the configuration" (P54205-B21) | Only a numeric UCID counts; Save runs once more; the permission Warning is answered with Save As New Configuration |
+| 43 | Services tab did not open (OCA recalculating, or its problem dialog open: S4R64A) | Problem dialogs are closed and the tab clicked again, up to 3 times |
+| 44 | OCA disables Auto-generate End BOM ("Currently not supported for auto generation. Use manual") for Cohesity/Veeam-type S-models | Reported at once: configuration saved, End BOM must be made manually (open question to the user whether to automate the manual End BOM) |
+| 45 | Solution model's server ("DL385 Gen11 #1") not found by the wizard name | Matched by part number in OCA's navigation tree; return to the solution by breadcrumb, else the tree |
 
 ## 5. Manual QA workflow (from the team's training video, 2026-10-14)
 
@@ -141,42 +171,46 @@ unit check, Summary-tab End BOM check, Save-blocked negative test, region choice
 configuration. Selectors for these need captured HTML first (CLAUDE.md): the Growth options table of
 End BOM Setup from two models; for Synergy, the configuration dropdown and a compute-module Menu page.
 
-## 6. Current state (2026-10-15)
+## 6. Current state (2026-10-20)
 
-- `main` is at `629c830` (plus this document) and pushed.
-- Models seen so far: P72176-B21 and P72297-B21 (DL360-class) succeeded end to end before the later
-  changes. P83540-B21 (DL580 Gen12) progressed through several repairs. P86628-B21 (DL110 Gen12)
-  is waiting for a re-run with the M.2 fix.
-- 2026-10-15: Node.js 24 is now installed on the development machine (`C:\Program Files\nodejs`),
-  so typecheck and unit tests run there: 102/102 pass after the DL320 fixes (change log).
-- Most change-log rows still say "Pending" for the run result.
+- `main` holds the fixes of 2026-10-20 (rows 38-40, 42-43 above) together with this document.
+  Before that, `d6ed8b2` (2026-10-19) and `eb234d6` (2026-10-18).
+- Run results so far, by family (each family is one batch of 4-14 models):
+  - Confirmed working end to end on OCA: DL360/DL320/DL340/DL380 Gen12 servers, DL580 Gen12
+    (P75399-B21), S3V83A (dHCI solution with its server), S2U63A (Data Solutions),
+    and the plain CTO models of DL325/DL345/DL360/DL365/DL380 Gen11.
+  - Run of 2026-10-19 (Gen11, on `d6ed8b2`): 21 of 42 models built an End BOM. The fixes of
+    2026-10-20 target P53934-B21, P67161-B21, P54960-B21, P54961-B21, P55432-B21, P52536-B21,
+    P54205-B21 and S4R64A; not yet re-run.
+- Cannot be fixed in the automation (report to the user, not code):
+  - No aaS search result: P61268-B21, the DL380a model, P42534-B21 (maybe a typo for P52534-B21).
+  - Auto-generate End BOM disabled by OCA ("Use manual"): S2G16A, S2G18A, S6X65A, S3T65A, S3T66A,
+    S3T67A, S3N84A, S4R63A. The configuration is saved; the End BOM must be made by hand.
+  - S3N87AAE: every memory product is supply-restricted (red "CS"); processor is a radio (qty 1)
+    while OCA wants 2.
+  - Unclear, need more information: S0V50A and S0V51A (solution "S" models) keep a Processor error
+    while a processor is selected; P54208-B21 keeps "If Processor below 240W ... Standard Heat Sink"
+    flagged with the Standard heat sink selected.
+  - S4R65A: DNS error on the run machine (network).
 
 ## 7. To do next
 
-0. Every log starts with `[INFO] Code version:`. Compare it with `git log -1` before diagnosing; ask for a re-run if it is older.
-1. On the run system: `git pull`, `npm run typecheck`, `npm run test:unit`. Fix anything that
-   fails first.
-2. Re-run **P86628-B21**. Expect M.2 to go 1 → 2 (`OCA allows 2-2; changing quantity 1 to 2`), and
-   on any retry the step lines to show section names. On attempt 2 OCA also listed power rules for
-   the 1000W DC PSU (P79329-B21): "DC Power Lug Kit OR DC Power Cord must be selected" and
-   "Qty of Power Cords selected must match Qty of Power Supply selected". These may need repair
-   support if they come back.
-3. Re-run the **DL320 Gen12** models (incl. P75220-B21 GPU) for the group-rule repair (#20).
-   Note: the DL320 run of 2026-10-14 used an older build.
-4. Re-run **P72176-B21** (Smart Chassis / heatsink conflict, now covered by the retry) and
-   **P83540-B21**. Confirm End BOM capacity values are correct.
-5. Look into what is still slow or noisy in the logs:
-   - The first aaS click on the landing page often doesn't take; selecting aaS took 1m 13s.
-   - "Blocking overlay did not become hidden within 60 seconds" is logged after turning off HPE
-     Recommended on every attempt.
-   - The memory menu sometimes fails to open on the first DIMM (the next candidate recovers).
-6. Make the **Solution Wizard** and **Storage** flows generic; they still use fixed choice ids.
+0. Every log starts with `[INFO] Code version:`. Compare it with `git log -1` (remember the Pacific
+   time shift for zip downloads) before diagnosing; ask for a re-run if it is older.
+1. Ask the user to download the zip again and re-run the failed models listed in section 6.
+2. Open questions to the user (no answer yet):
+   - Should the automation build a **manual End BOM** for models whose Auto-generate is disabled,
+     or only report them?
+   - Random picks: prefer OCA's "HPE recommended" products first?
+   - Storage Billing Tier "Written Usable TiB": the value entered is a placeholder 1
+     (`OCA_MANUAL_BILLING_CAPACITY`); what should it be?
+3. Make the **Solution Wizard** and **Storage** flows generic; they still use fixed choice ids.
    This needs captures from at least two models of each.
-7. Update the "Run result" column in the change log as runs are confirmed.
-8. Close the gaps in section 5, in this order (agreed with the user 2026-10-15): growth factor
+4. Close the gaps in section 5, in this order (agreed with the user 2026-10-15): growth factor
    (Excel column, e.g. `4` or `300%`) and End BOM = Start BOM × factor check; compute unit = memory
    GB × 85% check; Summary-tab End BOM UCID check; then Synergy multi-level configuration. Ask for the
    captured HTML before writing selectors.
+5. Update the "Run result" column in the change log as runs are confirmed.
 
 ## 8. Commands (run system)
 

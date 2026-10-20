@@ -170,6 +170,15 @@ function isPickable(row: RowInfo): boolean {
 
 interface RandomPolicy { quantities: number[]; radioOnly: boolean; limitWatts: boolean }
 
+/** An OCA error rule on a choice: its text, its own words, the choices it links and the products it names. */
+export interface OcaRule {
+  text: string; ownText: string; targets: string[];
+  products: Array<{ choiceId: string; productNumber: string }>;
+}
+
+/** Rules that forbid the products they name ("cannot be selected", "NOT allowed", "Supported with ... Only", "Max 2"). */
+const FORBIDDING_RULE = /\b(?:cannot|can\s*not|must\s+not)\s+be\s+selected\b|\bnot\s+(?:allowed|supported)\b|\bonly\b|\bmax(?:imum)?\b/i;
+
 /** A quantity range OCA states for one choice (from its "User Selection: Min/Max" and odd-quantity rules). */
 export interface QuantityRule { min: number; max: number; even: boolean }
 
@@ -509,10 +518,21 @@ export class ComponentEngine {
    * covers; only rules covering this choice alone are used, e.g. on DL580 Gen12:
    * "(User Selection: Min 2 // Max 4) Odd quantities of processor selection is not allowed. (Processor)".
    */
-  async quantityRule(choiceId: string): Promise<QuantityRule | null> {
+  async quantityRule(choiceId: string, description = ''): Promise<QuantityRule | null> {
     let rule: QuantityRule | null = null;
+    const title = await this.page.locator(`[id=${JSON.stringify(`choice_title_${choiceId}`)}]`).first()
+      .textContent({ timeout: 1_000 }).catch(() => '') ?? '';
     for (const { text, targets } of await this.choiceRules(choiceId)) {
-      if (targets.length !== 1 || targets[0] !== choiceId) continue;
+      // "If Secondary riser is selected, then 2 Processor must be selected. (Riser Cards, Processors)" (P67161-B21,
+      // DL365 Gen11): a rule over several choices sets this choice's minimum when its words name this choice.
+      const then = targets.includes(choiceId) ? text.match(/\bthen\s+(\d+)\s+(?!qty\b|of\b)(.+?)\s+must\s+be\s+selected/i) : null;
+      const counted = then && phraseScore(then[2], title) > 0 ? Number(then[1]) : 0;
+      if (targets.length !== 1 || targets[0] !== choiceId) {
+        if (!counted) continue;
+        rule ??= { min: 0, max: Number.POSITIVE_INFINITY, even: false };
+        rule.min = Math.max(rule.min, counted);
+        continue;
+      }
       const range = text.match(/User Selection:\s*Min\s*(\d+)\s*\/\/\s*Max\s*(\d+)/i);
       const even = /odd quantit(?:y|ies)\b[^.]*\bnot allowed/i.test(text);
       // "... then the drive cage quantity must be Qty 2" (P83540-B21, 8EDSFF in 2P).
@@ -524,12 +544,22 @@ export class ComponentEngine {
       // DL380 Gen12): at least that many of this choice. "Qty1 of P51083-B21 … must be selected" names
       // another product and is left to the other repairs.
       const atLeast = text.match(/(?:^|\bthen\s+)Qty\s*=?\s*(\d+)\b(?!\s*of\b).*?\bmust be selected/i);
-      if (!range && !even && !exact && !bounds && !atLeast) continue;
+      // "Minimum 2 Processor must be selected", "Minimum 2 Heat sink is required" (S3N87AAE, DL380 Gen11);
+      // "Min 1/Max 1" and "Minimum 2 and Maximum 2" are ranges, read above.
+      const minimum = text.match(/\bMin(?:imum)?\s*=?\s*(\d+)\b(?!\s*(?:\/|and\b))[^/]*?\b(?:(?:must|should)\s+be\s+selected|is\s+required)\b/i);
+      // "For ALL CTO models (vSAN solutions), the Total memory capacity must total 256GB or higher." (P52536-B21,
+      // DL380 Gen11): enough kits of the selected size ("HPE 32GB (1x32GB) ...") to reach it.
+      const capacity = Number(text.match(/\btotal\s+memory\s+capacity\s+must\s+(?:total|be)\s+(\d+)\s*GB\s+or\s+(?:higher|more)\b/i)?.[1]);
+      const kitSize = Number(description.match(/\b(\d+)\s*GB\b/i)?.[1]);
+      const kits = capacity && kitSize ? Math.ceil(capacity / kitSize) : 0;
+      if (!range && !even && !exact && !bounds && !atLeast && !minimum && !kits) continue;
       rule ??= { min: 0, max: Number.POSITIVE_INFINITY, even: false };
       if (range) { rule.min = Math.max(rule.min, Number(range[1])); rule.max = Math.min(rule.max, Number(range[2])); }
       if (bounds) { rule.min = Math.max(rule.min, Number(bounds[1])); rule.max = Math.min(rule.max, Number(bounds[2])); }
       if (exact) { rule.min = Math.max(rule.min, Number(exact[1])); rule.max = Math.min(rule.max, Number(exact[1])); }
       if (atLeast) rule.min = Math.max(rule.min, Number(atLeast[1]));
+      if (minimum) rule.min = Math.max(rule.min, Number(minimum[1]));
+      if (kits) rule.min = Math.max(rule.min, kits);
       rule.even ||= even;
     }
     return rule;
@@ -539,16 +569,22 @@ export class ComponentEngine {
    * OCA's error-level rules shown on a choice: each li.message_li's text and the choice ids
    * its a.err-lnk links name (the choices the rule covers).
    */
-  async choiceRules(choiceId: string): Promise<Array<{ text: string; ownText: string; targets: string[] }>> {
+  async choiceRules(choiceId: string): Promise<OcaRule[]> {
     return this.page.locator(`[id=${JSON.stringify(`choice_header_${choiceId}`)}] li.message_li .error_message`)
       .evaluateAll((spans) => spans.map((span) => {
         // ownText leaves out the linked choice titles, which every rule lists after its own words.
         const own = span.cloneNode(true) as HTMLElement;
         own.querySelectorAll('a.err-lnk').forEach((link) => link.remove());
+        const links = Array.from(span.querySelectorAll('a.err-lnk'));
         return {
           text: (span.textContent ?? '').replace(/\s+/g, ' ').trim(),
           ownText: (own.textContent ?? '').replace(/\(\s*(?:,\s*)*\)/g, '').replace(/\s+/g, ' ').trim(),
-          targets: Array.from(span.querySelectorAll('a.err-lnk')).map((link) => link.id),
+          targets: links.map((link) => link.id),
+          // A link may name one product of the choice: "P58456-B21 (Heatsink Kit)".
+          products: links.map((link) => ({
+            choiceId: link.id,
+            productNumber: (link.textContent ?? '').trim().match(/^([A-Z0-9][A-Z0-9#-]*\d[A-Z0-9#-]*)\s*\(/i)?.[1] ?? '',
+          })).filter((product) => product.productNumber),
         };
       }));
   }
@@ -606,9 +642,10 @@ export class ComponentEngine {
       }
     }
     // "Minimum one heatsink kit must be selected (Heatsink Kit)" (S8J34A, SimpliVity 325 Gen12): the
-    // choice's own rule asks for any one of its products.
+    // choice's own rule asks for any one of its products; "Minimum 2 Heat sink is required" (S3N87AAE) for two,
+    // which the choice's quantity rule then sets.
     const ownMinimum = rules.some((rule) => rule.targets.length === 1 && rule.targets[0] === choice.id
-      && /\b(?:minimum|min|at[- ]least)\s*=?\s*(?:one|1)\b.*?\bmust be selected\b/i.test(rule.text));
+      && /\b(?:minimum|min|at[- ]least)\s*=?\s*(?:one|\d+)\b.*?\b(?:(?:must|should)\s+be\s+selected|is\s+required)\b/i.test(rule.text));
     if (!candidates.size && (allowUnnamed || ownMinimum)) {
       for (const row of await this.rowInfo(this.choiceRows(choice.id))) if (isPickable(row)) candidates.set(row.id, { ...row, choiceId: choice.id });
       source = 'its available products';
@@ -708,25 +745,87 @@ export class ComponentEngine {
    */
   private async repairRequiresRule(choice: MenuChoice): Promise<boolean> {
     for (const rule of await this.choiceRules(choice.id)) {
-      const wanted = rule.ownText.match(/requires?\s+(?:the\s+)?selection\s+of\s+(.+?)\s*\.?\s*$/i)?.[1];
+      const requires = rule.ownText.match(/requires?\s+(?:the\s+)?selection\s+of\s+(.+?)\s*\.?\s*$/i)?.[1];
+      // "Processor upto 240W is selected then 7 Qty of Standard Fan Kit must be selected" (P54960-B21, DL325 Gen11)
+      // and "If 96GB or higher Memory is selected then High Performance Fan Kit must be selected" (P55432-B21, DL380
+      // Gen11) sit on Processor or Memory and ask for a product of another choice. A rule naming a processor or memory
+      // kind is left to repairRequiredKindRule.
+      const then = requires || requiredKind(rule.ownText) ? null
+        : rule.ownText.match(/\bthen\s+(?:(\d+)\s*Qty\s+of\s+)?(.+?)\s+must\s+be\s+selected\b/i);
+      const wanted = requires ?? then?.[2];
       if (!wanted) continue;
+      const count = Number(then?.[1] ?? 1) || 1;
       const targets = [...new Set([choice.id, ...rule.targets])];
       await this.openOwners(targets);
-      const rows: Array<RowInfo & { choiceId: string; score: number }> = [];
+      const rows: Array<RowInfo & { choiceId: string; score: number; committed: number }> = [];
       for (const target of targets) {
         for (const row of await this.rowInfo(this.choiceRows(target))) {
-          if (isPickable(row) && this.committedQuantity(row) === 0) rows.push({ ...row, choiceId: target, score: phraseScore(wanted, row.description) });
+          const committed = this.committedQuantity(row);
+          // A selected product counts for a "then ... must be selected" rule: it may only need more of it.
+          if (then ? row.productNumber && (isPickable(row) || committed > 0) : isPickable(row) && committed === 0) {
+            rows.push({ ...row, choiceId: target, score: phraseScore(wanted, row.description), committed });
+          }
         }
       }
       const best = Math.max(0, ...rows.map((row) => row.score));
       // One shared word (the model name in "NS204i-u Cbl kit") is not enough to tell the products apart.
       if (best < 2) continue;
-      const candidates = rows.filter((row) => row.score === best);
-      console.log(`[STEP] OCA rule "${rule.ownText}" asks for ${wanted}; adding one of: ${candidates.map((row) => row.productNumber).join(', ')}`);
-      await this.fillOne(choice.title || choice.id, candidates);
+      const top = rows.filter((row) => row.score === best);
+      const selected = top.find((row) => row.committed > 0);
+      if (selected) {
+        if (selected.committed >= count) continue;
+        console.log(`[STEP] OCA rule "${rule.ownText}" asks for ${count}; raising ${selected.productNumber} from ${selected.committed}`);
+        await this.quantities.set(this.page.locator(`[id=${JSON.stringify(selected.id)}]`), selected.productNumber, count, false, { acceptOffered: true });
+        return true;
+      }
+      const candidates = top.filter((row) => isPickable(row));
+      if (!candidates.length) continue;
+      console.log(`[STEP] OCA rule "${rule.ownText}" asks for ${count > 1 ? `${count} of ` : ''}${wanted}; adding one of: `
+        + candidates.map((row) => row.productNumber).join(', '));
+      await this.fillOne(choice.title || choice.id, candidates, count);
       return true;
     }
     return false;
+  }
+
+  /**
+   * Rules that forbid products OCA names one by one. On P53934-B21 (DL365 Gen11 EDSFF, 2026-10-19) OCA's own base
+   * held two Standard and one Performance heat sink: "Mixing of Standard and Performance Heatsink is NOT allowed.
+   * (P58457-B21 (Heatsink Kit), P58456-B21 (Heatsink Kit))", "Supported with 8SFF CTO Model Only. (P58456-B21 (Heatsink
+   * Kit))" and "If Standard Heatsink is selected, then Performance Fan cannot be selected. (P58462-B21 (Power Cooling
+   * Options), P58456-B21 (Heatsink Kit))". Each rule blames the selected products it names; "If A is selected, then B
+   * cannot be selected" blames only B. The product blamed most is removed, when its choice keeps another product.
+   */
+  private async repairConflictRule(choice: MenuChoice): Promise<boolean> {
+    const rowsByChoice = new Map<string, RowInfo[]>();
+    const blamed = new Map<string, RowInfo & { choiceId: string; blame: number }>();
+    for (const rule of await this.choiceRules(choice.id)) {
+      if (!rule.products.length || !FORBIDDING_RULE.test(rule.ownText) || /\bmust\s+be\s+selected\b/i.test(rule.ownText)) continue;
+      const named: Array<RowInfo & { choiceId: string }> = [];
+      for (const { choiceId, productNumber } of rule.products) {
+        if (!rowsByChoice.has(choiceId)) rowsByChoice.set(choiceId, await this.rowInfo(this.choiceRows(choiceId)));
+        const row = rowsByChoice.get(choiceId)!.find((item) => item.productNumber === productNumber && this.committedQuantity(item) > 0);
+        if (row && !named.some((item) => item.id === row.id)) named.push({ ...row, choiceId });
+      }
+      const then = rule.ownText.match(/\bthen\s+(.+?)\s+(?:cannot|can\s*not|must\s+not)\b/i)?.[1];
+      const scores = named.map((row) => (then ? phraseScore(then, row.description) : 0));
+      const best = Math.max(0, ...scores);
+      named.forEach((row, index) => {
+        if (best > 0 && scores[index] < best) return;
+        const entry = blamed.get(row.id) ?? { ...row, blame: 0 };
+        entry.blame += 1;
+        blamed.set(row.id, entry);
+      });
+    }
+    const removable = [...blamed.values()].filter((row) => rowsByChoice.get(row.choiceId)!
+      .some((other) => other.id !== row.id && other.productNumber && this.committedQuantity(other) > 0 && !isDimmBlank(other.description)))
+      .sort((a, b) => b.blame - a.blame);
+    const [worst] = removable;
+    if (!worst) return false;
+    await this.openOwners([worst.choiceId]);
+    console.log(`[STEP] OCA rules on "${choice.title || choice.id}" forbid ${worst.productNumber} (named by ${worst.blame}); removing it`);
+    await this.quantities.set(this.page.locator(`[id=${JSON.stringify(worst.id)}]`), worst.productNumber, 0, false);
+    return true;
   }
 
   /**
@@ -777,7 +876,8 @@ export class ComponentEngine {
   private async repairMatchRule(choice: MenuChoice): Promise<boolean> {
     const rules = await this.choiceRules(choice.id);
     for (const rule of rules) {
-      if (rule.targets.length !== 2 || !/\bquantity of \b.+?\band quantity of \b.+?\bmust match\b/i.test(rule.ownText)) continue;
+      // "... must be equal" on P53934-B21 (DL365 Gen11).
+      if (rule.targets.length !== 2 || !/\bquantity of \b.+?\band quantity of \b.+?\bmust (?:match|be equal)\b/i.test(rule.ownText)) continue;
       await this.openOwners(rule.targets);
       const sides = await Promise.all(rule.targets.map(async (id) => {
         const rows = (await this.rowInfo(this.choiceRows(id)))
@@ -844,7 +944,8 @@ export class ComponentEngine {
 
   /** Brings a committed quantity into OCA's rule for the choice; returns the quantity now committed. */
   private async enforceQuantityRule(choiceId: string, row: Locator, productNumber: string, quantity: number): Promise<number> {
-    const rule = await this.quantityRule(choiceId);
+    const description = (await row.locator('.item_desc').first().textContent({ timeout: 1_000 }).catch(() => '') ?? '').replace(/\s+/g, ' ').trim();
+    const rule = await this.quantityRule(choiceId, description);
     if (!rule) return quantity;
     const allowed = fitQuantity(quantity, rule);
     if (allowed === quantity) return quantity;
@@ -992,6 +1093,10 @@ export class ComponentEngine {
     }
     for (const choice of flagged) {
       if (await this.repairRequiredKindRule(choice)) return;
+    }
+    // A forbidden product goes before quantities are matched: otherwise the allowed one might be removed.
+    for (const choice of flagged) {
+      if (await this.repairConflictRule(choice)) return;
     }
     for (const choice of flagged) {
       if (await this.repairMatchRule(choice)) return;

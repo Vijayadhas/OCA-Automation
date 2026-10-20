@@ -85,3 +85,16 @@ test('clicks the Services tab again when its panel does not appear', async ({ pa
   expect(await new SupportServices(page).select()).toMatchObject({ serviceExperience: 'Standard' });
   expect(await page.evaluate(() => (window as unknown as { clicks: number }).clicks)).toBe(2);
 });
+
+// S4R64A (DL380 Gen11, 2026-10-19): "(OCA) has encountered a problem" stayed open over the Services tab.
+test('closes OCA problem dialog before clicking the Services tab', async ({ page }) => {
+  await page.setContent(servicesPage(false)
+    .replace('<a href="#services" role="link">', `<a href="#services" role="link" onclick="
+      if (getComputedStyle(problem).display === 'none') document.getElementById('experience-and-term').style.display = 'block'">`)
+    .replace('<div id="experience-and-term">', `<div id="problem" class="ui-dialog" role="dialog">
+      <span class="ui-dialog-title">(OCA) has encountered a problem</span>
+      <button class="ui-dialog-titlebar-close" onclick="problem.style.display='none'">x</button></div>
+      <div id="experience-and-term" style="display:none">`));
+  expect(await new SupportServices(page).select()).toMatchObject({ serviceExperience: 'Standard' });
+  await expect(page.locator('#problem')).toBeHidden();
+});

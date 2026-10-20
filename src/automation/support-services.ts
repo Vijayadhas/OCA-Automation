@@ -2,6 +2,7 @@ import { expect, type Locator, type Page } from '@playwright/test';
 import { waitForBlockingOverlay } from '../core/waits';
 import { revealForViewer } from '../core/interactions';
 import { MandatorySelectionError } from '../core/errors';
+import { dismissOcaMessageDialogs } from '../core/oca-problem';
 
 export interface SupportServiceSelection {
   serviceExperience: string;
@@ -20,8 +21,10 @@ export class SupportServices {
     const support = this.page.locator('#experience-and-term').filter({ visible: true }).first();
     const heading = support.getByText('Support Services', { exact: true });
     // P73285-B21 (DL380 Gen12, 2026-10-18): the click came while OCA was still recalculating and the Menu
-    // stayed open for 60 s. The tab is clicked again when its panel has not appeared.
+    // stayed open for 60 s. The tab is clicked again when its panel has not appeared. On S4R64A (DL380 Gen11,
+    // 2026-10-19) OCA's "(OCA) has encountered a problem" dialog was open and its overlay took every click; it is closed first.
     for (let attempt = 1; ; attempt += 1) {
+      await dismissOcaMessageDialogs(this.page);
       await expect(services).toBeVisible({ timeout: 60_000 });
       await services.click({ force: true });
       await waitForBlockingOverlay(this.page);

@@ -267,3 +267,75 @@ test('fills an empty choice whose own rule asks for minimum one product', async 
   await new ComponentEngine(page).satisfyRequiredSection('Processor');
   await expect(page.locator('#item_tr_HEAT_cpuX_heat select')).toHaveValue('1');
 });
+
+// P53934-B21 (DL365 Gen11 EDSFF, 2026-10-19): OCA's own base held two Standard and one Performance heat sink against
+// two processors; the Standard one is "Supported with 8SFF CTO Model Only".
+test('removes the product OCA rules forbid most before matching processor and heat sink quantities', async ({ page }) => {
+  const heat = (number: string): [string, string] => ['cpuX_heat', `${number} (Heatsink Kit)`];
+  const fan = (number: string): [string, string] => ['fanX_fans', `${number} (Power Cooling Options)`];
+  const match = errorRule('Quantity of Processor and Quantity of Heatsink must be equal.', [['cpuX_cpus', 'Processors'], ['cpuX_heat', 'Heatsink Kit']]);
+  const rules = match
+    + errorRule('If Standard Heatsink is selected, then Performance Fan cannot be selected.', [fan('P58462-B21'), heat('P58456-B21')])
+    + errorRule('If Performance Heatsink OR DLC Module is selected, then Standard Fan cannot be selected', [fan('P58461-B21'), heat('P58457-B21')])
+    + errorRule('Mixing of Standard and Performance Heatsink is NOT allowed.', [heat('P58457-B21'), heat('P58456-B21')])
+    + errorRule('Max 2 Heat Sink can be allowed', [heat('P58456-B21'), heat('P58457-B21')])
+    + errorRule('Supported with 8SFF CTO Model Only.', [heat('P58456-B21')]);
+  await page.setContent(heatsinkSection(
+    [{ pid: 'P58540-B21', description: 'AMD EPYC 9224 2.5GHz 24-core 200W Processor for HPE', quantity: 2, select: [0, 1, 2] }],
+    [
+      { pid: 'P58456-B21', description: 'HPE ProLiant DL3X5 Gen11 1U CPU Standard Heat Sink Kit', quantity: 2, select: [0, 1, 2] },
+      { pid: 'P58457-B21', description: 'HPE ProLiant DL3X5 Gen11 1U CPU Performance Heat Sink Kit', quantity: 1, select: [0, 1, 2] },
+    ], match, rules) + menuSection({ key: 'fanX', title: 'Power', collapsed: true, choices: [{ id: 'fanX_fans', title: 'Power Cooling Options', rows: [
+    { pid: 'P58461-B21', description: 'HPE ProLiant DL3XX Gen11 1U Standard Fan Kit', quantity: 7, select: [0, 1, 7] },
+    { pid: 'P58462-B21', description: 'HPE ProLiant DL3XX Gen11 1U Performance Fan Kit', quantity: 1, select: [0, 1, 7] },
+  ] }] }));
+  await new ComponentEngine(page).satisfyRequiredSection('Processor');
+  await expect(page.locator('#item_tr_P58456-B21_cpuX_heat select')).toHaveValue('0');
+  await expect(page.locator('#item_tr_P58457-B21_cpuX_heat select')).toHaveValue('1');
+  await expect(page.locator('#item_tr_P58461-B21_fanX_fans select')).toHaveValue('7');
+  await expect(page.locator('#item_tr_P58540-B21_cpuX_cpus select')).toHaveValue('2');
+});
+
+// P67161-B21 (DL365 Gen11 OEM, 2026-10-19).
+test('raises the processor when a rule over several choices asks for 2 Processor', async ({ page }) => {
+  const rule = errorRule('If Secondary riser is selected, then 2 Processor must be selected.', [['riserX_risers', 'Riser Cards'], ['cpuX_cpus', 'Processors']]);
+  await page.setContent(heatsinkSection([{ pid: 'CPU', description: 'AMD EPYC 9224 2.25GHz 24-core 200W Processor for HPE OEM', quantity: 1, select: [0, 1, 2] }],
+    [], rule, ''));
+  expect(await new ComponentEngine(page).quantityRule('cpuX_cpus')).toEqual({ min: 2, max: Number.POSITIVE_INFINITY, even: false });
+  await new ComponentEngine(page).satisfyRequiredSection('Processor');
+  await expect(page.locator('#item_tr_CPU_cpuX_cpus select')).toHaveValue('2');
+});
+
+// P54960-B21 (DL325 Gen11, 2026-10-19): the Processor choice stayed flagged until fans were selected.
+test('adds the quantity of the product a "then 7 Qty of ... must be selected" rule asks for', async ({ page }) => {
+  const rule = errorRule('Processor upto 240W is selected then 7 Qty of Standard Fan Kit must be selected. - Above rule is not applicable if Performance Fan Kit in the order',
+    [['fanX_fans', 'Power Cooling Options'], ['cpuX_cpus', 'Processors']]);
+  await page.setContent(heatsinkSection([{ pid: 'CPU', description: 'AMD EPYC 9334 2.7GHz 32-core 210W Processor for HPE', quantity: 1, select: [0, 1] }],
+    [], rule, '') + menuSection({ key: 'fanX', title: 'Power', collapsed: true, choices: [{ id: 'fanX_fans', title: 'Power Cooling Options', rows: [
+    { pid: 'STDFAN', description: 'HPE ProLiant DL3XX Gen11 1U Standard Fan Kit', select: [0, 1, 7] },
+    { pid: 'LIQFAN', description: 'HPE ProLiant DL325 Gen11 Liquid Cooling Fan Kit', select: [0, 1, 7] },
+  ] }] }));
+  await new ComponentEngine(page).satisfyRequiredSection('Processor');
+  await expect(page.locator('#item_tr_STDFAN_fanX_fans select')).toHaveValue('7');
+  await expect(page.locator('#item_tr_LIQFAN_fanX_fans select')).toHaveValue('0');
+});
+
+// S3N87AAE (DL380 Gen11 for Veeam) and P52536-B21 (DL380 Gen11 vSAN), 2026-10-19.
+test('reads "Minimum N ... must be selected" and a total memory capacity as minimums', async ({ page }) => {
+  const own = (text: string) => errorRule(text, [['cpuX_cpus', 'Processors']]);
+  await page.setContent(heatsinkSection([{ pid: 'CPU', select: [0, 1, 2] }], [],
+    own('Minimum 2 Processor must be selected') + own('For Gen11/Gen12/Gen13 servers ONLY: Min 1/Max 1 per server.'), ''));
+  expect((await new ComponentEngine(page).quantityRule('cpuX_cpus'))?.min).toBe(2);
+  await page.setContent(heatsinkSection([{ pid: 'CPU', select: [0, 1, 2] }], [],
+    own('For ALL CTO models (vSAN solutions), the Total memory capacity must total 256GB or higher.'), ''));
+  expect((await new ComponentEngine(page).quantityRule('cpuX_cpus', 'HPE 32GB (1x32GB) Dual Rank x8 DDR5-5600 Memory Kit'))?.min).toBe(8);
+});
+
+test('fills an empty choice whose own rule asks for a minimum of two', async ({ page }) => {
+  await page.setContent(heatsinkSection(
+    [{ pid: 'CPU', description: 'Intel Xeon-Silver 4510 2.4GHz 12-core 150W Processor for HPE', quantity: 2, select: [0, 1, 2] }],
+    [{ pid: 'HEAT', description: 'HPE ProLiant DL380/DL560 Gen11 High Performance 2U Heat Sink Kit', select: [0, 1, 2] }],
+    '', errorRule('Minimum 2 Heat sink is required', [['cpuX_heat', 'Heatsink Kit']])));
+  await new ComponentEngine(page).satisfyRequiredSection('Processor');
+  await expect(page.locator('#item_tr_HEAT_cpuX_heat select')).toHaveValue('2');
+});

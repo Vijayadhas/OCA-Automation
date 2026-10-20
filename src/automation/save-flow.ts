@@ -51,12 +51,24 @@ export class SaveFlow {
     const dialog = this.page.locator('.ui-dialog, [role="dialog"]')
       .filter({ visible: true, hasText: /Save|CLIC Status|Acknowledge/i }).last();
     await expect(dialog, 'Save OCA Config 2 dialog').toBeVisible({ timeout: 60_000 });
+    const saveButtons = () => dialog.locator('#save_btn').or(dialog.getByRole('button', { name: 'Save', exact: true }))
+      .filter({ visible: true }).last();
+
+    // P54205-B21 (DL345 Gen11, 2026-10-19): the first Save was stored although the header still read TempUCID, so the
+    // rerun got OCA's Warning "You have no permission to edit the configuration. You can save as new version or save
+    // as new configuration." in place of the Save dialog. Save As New Configuration stores it under a new UCID.
+    const saveAsNew = dialog.getByRole('button', { name: /^Save As New Configuration$/i }).filter({ visible: true }).first();
+    if (await saveAsNew.isVisible({ timeout: 1_000 }).catch(() => false)) {
+      console.log('[WARN] OCA cannot edit this configuration (it was already saved); choosing Save As New Configuration');
+      await saveAsNew.click({ force: true });
+      await waitForBlockingOverlay(this.page);
+      if (!await saveButtons().waitFor({ state: 'visible', timeout: 15_000 }).then(() => true, () => false)) return this.verifySaved();
+    }
 
     for (let attempt = 1; attempt <= 5; attempt += 1) {
       console.log(`[STEP] Save acknowledgement attempt ${attempt}/5`);
       await this.ensureAcknowledgements(dialog);
-      const saveButton = dialog.locator('#save_btn').or(dialog.getByRole('button', { name: 'Save', exact: true }))
-        .filter({ visible: true }).last();
+      const saveButton = saveButtons();
       await expect(saveButton).toBeVisible({ timeout: 60_000 });
       if (await this.isDisabled(saveButton)) {
         await this.closeDialogForRecovery(dialog);
