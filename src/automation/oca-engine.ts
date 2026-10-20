@@ -2,6 +2,7 @@ import { resolveConfigurationErrors, type ResolveOptions } from './configuration
 import { expect, type BrowserContext, type Page } from '@playwright/test';
 import { customerAccountFor, searchDescriptionFor, type OcaJob } from '../models/job';
 import { CustomerAccount } from './customer-account';
+import { Country } from './country';
 import type { AutomationResult } from '../models/automation-result';
 import { createPendingResult } from '../models/automation-result';
 import { waitForBlockingOverlay } from '../core/waits';
@@ -76,12 +77,15 @@ export class OcaEngine {
     this.currentStep = 'Select aaS';
     await this.measure('Select aaS and verify landing', () => this.selectAasAndVerifyLanding());
     // Customer Account stays set in OCA between models, so each model sets its own or clears it.
+    // Country: the Excel value (e.g. Saudi Arabia for the Arcus solution), else OCA's default, United States.
+    this.currentStep = 'Set Country';
+    await this.measure('Set Country', () => new Country(this.activePage).apply(job.country));
     this.currentStep = 'Set Customer Account';
     await this.measure('Set Customer Account', () => new CustomerAccount(this.activePage).apply(customerAccountFor(job)));
     this.currentStep = 'Search model';
     const route = job.isStorage ? 'Storage' : job.isSolution ? 'Solution' : job.modelType === 'Nutanix' ? 'Nutanix (Server route)' : 'Server';
     const description = searchDescriptionFor(job);
-    console.log(`[INFO] Excel model selection: model type=${job.modelType ? route : `<blank>, treated as ${route}`}; description=${description ?? '<blank>'}; customer account=${customerAccountFor(job) || '<none>'}; integration rack=${job.integrationRackPartNumber ?? '<blank>'}`);
+    console.log(`[INFO] Excel model selection: model type=${job.modelType ? route : `<blank>, treated as ${route}`}; description=${description ?? '<blank>'}; customer account=${customerAccountFor(job) || '<none>'}; country=${job.country ?? '<blank>'}; integration rack=${job.integrationRackPartNumber ?? '<blank>'}`);
     const model = await this.measure('Search and open model', () =>
       new ModelSearch(this.context).searchAndOpen(this.activePage, {
         modelNumber: job.modelNumber,

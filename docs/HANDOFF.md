@@ -133,6 +133,7 @@ Main code: `src/automation/component-engine.ts` (`ComponentEngine`),
 | 43 | Services tab did not open (OCA recalculating, or its problem dialog open: S4R64A) | Problem dialogs are closed and the tab clicked again, up to 3 times |
 | 44 | OCA disables Auto-generate End BOM ("Currently not supported for auto generation. Use manual") for Cohesity/Veeam-type S-models | Reported at once: configuration saved, End BOM must be made manually (open question to the user whether to automate the manual End BOM) |
 | 45 | Solution model's server ("DL385 Gen11 #1") not found by the wizard name | Matched by part number in OCA's navigation tree; return to the solution by breadcrumb, else the tree |
+| 46 | Arcus solution must be configured in Saudi Arabia; searched by a word ("Private"); Server Qty below the wizard's "Min 3"; fixed Menu quantities | Country field (blank = United States) set on the landing page by its label; search by description and Wizard card; Server Qty within the wizard's stated range; solution Menu picks follow the choice's quantity rule (2026-10-20) |
 
 ## 5. Manual QA workflow (from the team's training video, 2026-10-14)
 
@@ -199,19 +200,21 @@ End BOM Setup from two models; for Synergy, the configuration dropdown and a com
 0. Every log starts with `[INFO] Code version:`. Compare it with `git log -1` (remember the Pacific
    time shift for zip downloads) before diagnosing; ask for a re-run if it is older.
 1. Ask the user to download the zip again and re-run the failed models listed in section 6.
-2. Open questions to the user (no answer yet):
+2. Run the Arcus solution in Saudi Arabia (input template JOB-013, Country = SAUDI ARABIA) with
+   Capture HTML on, and check the Country step and the server inside the solution.
+3. Open questions to the user (no answer yet):
    - Should the automation build a **manual End BOM** for models whose Auto-generate is disabled,
      or only report them?
    - Random picks: prefer OCA's "HPE recommended" products first?
    - Storage Billing Tier "Written Usable TiB": the value entered is a placeholder 1
      (`OCA_MANUAL_BILLING_CAPACITY`); what should it be?
-3. Make the **Solution Wizard** and **Storage** flows generic; they still use fixed choice ids.
-   This needs captures from at least two models of each.
-4. Close the gaps in section 5, in this order (agreed with the user 2026-10-15): growth factor
+4. Make the **Solution Wizard** and **Storage** flows generic; they still use fixed choice ids (the dHCI
+   wizard: `#dhci_*`). This needs captures of a second, different wizard and storage model.
+5. Close the gaps in section 5, in this order (agreed with the user 2026-10-15): growth factor
    (Excel column, e.g. `4` or `300%`) and End BOM = Start BOM × factor check; compute unit = memory
    GB × 85% check; Summary-tab End BOM UCID check; then Synergy multi-level configuration. Ask for the
    captured HTML before writing selectors.
-5. Update the "Run result" column in the change log as runs are confirmed.
+6. Update the "Run result" column in the change log as runs are confirmed.
 
 ## 8. Commands (run system)
 

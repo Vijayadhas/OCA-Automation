@@ -430,7 +430,10 @@ export class ComponentEngine {
       row: this.page.locator(`[id=${JSON.stringify(row.id)}]`), productNumber: row.productNumber, description: row.description,
     })), async (candidate) => {
       const set = await this.quantities.set(candidate.row, candidate.productNumber, quantity, false, { acceptOffered: true });
-      return { productNumber: candidate.productNumber, description: candidate.description, quantity: set };
+      // The quantity asked for is a default (solution Menu: Capacity 16, DAC Cables 8); the choice's own OCA
+      // rule ("Minimum N ...", "User Selection: Min // Max") decides when it states another range.
+      const committed = await this.enforceQuantityRule(target.id, candidate.row, candidate.productNumber, set);
+      return { productNumber: candidate.productNumber, description: candidate.description, quantity: committed };
     }, REPAIR_CANDIDATE_TRIES);
     console.log(`[STEP] ${label}: ${picked.productNumber} x${picked.quantity}`);
     return { ...picked, choiceTitle: target.title };

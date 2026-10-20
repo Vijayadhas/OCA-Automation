@@ -4,7 +4,7 @@ import { selectionTypes } from '../models/component-instruction';
 
 /** Models sheet columns: the fields of the dashboard's Add model dialog. */
 export const TEMPLATE_MODEL_COLUMNS = [
-  'Job ID', 'Model Number', 'Model Type', 'Model Description', 'Customer Account', 'Service Type', 'Server',
+  'Job ID', 'Model Number', 'Model Type', 'Model Description', 'Customer Account', 'Country', 'Service Type', 'Server',
   'Integration Rack Part number', 'Solution Name', 'Generate End BOM', 'Enabled',
 ] as const;
 
@@ -24,6 +24,7 @@ const instructions: Array<[string, string, string]> = [
     + 'Nutanix models use "Nutanix" when blank.'],
   ['Customer Account', 'Optional', 'Advanced Settings Customer Account, exactly as OCA lists it. Blank: cleared '
     + '(Nutanix models: Nutanix).'],
+  ['Country', 'Optional', 'Landing page Country, as OCA lists it (e.g. SAUDI ARABIA) or its code (SA). Blank: UNITED STATES.'],
   ['Service Type', 'Optional', 'Random (default) or the service experience to select.'],
   ['Server', 'Optional', 'Solution models: the server to pick in the Solution Wizard.'],
   ['Integration Rack Part number', 'Optional', 'Blank: Standalone. Yes: any rack. Or the rack option text.'],
@@ -45,7 +46,7 @@ const instructions: Array<[string, string, string]> = [
 export function buildInputTemplate(): XLSX.WorkBook {
   // Models already run against OCA, with what the last run showed (Notes is not read by the tool).
   const model = (jobId: string, modelNumber: string, modelType: string, notes: string) =>
-    [jobId, modelNumber, modelType, '', '', 'Random', '', '', '', 'Yes', 'Yes', notes];
+    [jobId, modelNumber, modelType, '', '', '', 'Random', '', '', '', 'Yes', 'Yes', notes];
   const models = [
     model('JOB-001', 'P72176-B21', 'Server', 'DL360 Gen12. Passed end to end.'),
     model('JOB-002', 'P72297-B21', 'Server', 'DL360-class. Passed end to end.'),
@@ -59,6 +60,9 @@ export function buildInputTemplate(): XLSX.WorkBook {
     model('JOB-010', 'P72176-B21', 'Nutanix', 'Nutanix DL360 G12. Failed in Customer Account; fixed, retest.'),
     model('JOB-011', 'S3V83A', 'Solution', 'dHCI solution. Wizard and Menu passed; server inside the solution added, retest.'),
     model('JOB-012', 'S2U63A', 'Server', 'DL380 Gen11 Data Solutions. Stopped at Billing Tier; capacity entry added, retest.'),
+    // Arcus: HPE GreenLake for PC3000 with Alletra Storage MP (Block), configured in Saudi Arabia (2026-10-20).
+    ['JOB-013', 'S3V83A', 'Solution', 'HPE GreenLake for PC3000 with Alletra Storage MP (Block)', '', 'SAUDI ARABIA', 'Random', '', '', '',
+      'Yes', 'Yes', 'Arcus dHCI solution in Saudi Arabia (same product as JOB-011). New: Country; retest.'],
   ];
   // No component rows: every model gets random Processor, Memory, Smart Chassis and Power Supplies.
   const components: unknown[][] = [];
@@ -69,7 +73,7 @@ export function buildInputTemplate(): XLSX.WorkBook {
     return worksheet;
   };
   XLSX.utils.book_append_sheet(workbook, sheet([[...TEMPLATE_MODEL_COLUMNS, 'Notes'], ...models],
-    [10, 14, 12, 26, 20, 13, 18, 26, 22, 16, 9, 90]), 'Models');
+    [10, 14, 12, 26, 20, 16, 13, 18, 26, 22, 16, 9, 90]), 'Models');
   XLSX.utils.book_append_sheet(workbook, sheet([[...TEMPLATE_COMPONENT_COLUMNS], ...components],
     [10, 18, 16, 9, 15, 22, 9]), 'Components');
   XLSX.utils.book_append_sheet(workbook, sheet([['Column', 'Values', 'Meaning'], ...instructions], [28, 34, 110]), 'Instructions');

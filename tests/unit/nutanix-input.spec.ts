@@ -54,3 +54,15 @@ test('reads Customer Account from the Models sheet', () => {
   XLSX.writeFile(workbook, file);
   expect(new ExcelReader().read(file)[0].customerAccount).toBe('Nvidia');
 });
+
+test('reads Country from the Models sheet', () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'oca-country-')), 'models.xlsx');
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet([
+    { 'Job ID': 'J1', 'Model Number': 'S3V83A', 'Model Type': 'Solution', Country: 'Saudi Arabia' },
+    { 'Job ID': 'J2', 'Model Number': 'P72176-B21', 'Model Type': 'Server' },
+  ]), 'Models');
+  XLSX.writeFile(workbook, file);
+  const jobs = new ExcelReader().read(file);
+  expect(jobs.map((job) => job.country)).toEqual(['Saudi Arabia', undefined]);
+});

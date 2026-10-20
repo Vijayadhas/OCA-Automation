@@ -36,6 +36,15 @@ interface WizardChoice {
 
 const normalized = (value: string): string => value.replace(/\s+/g, ' ').trim();
 
+/** The last "Min N / Max M" in wizard text before a quantity field; 1-16 when the wizard states none. */
+export function wizardRange(textBefore: string): { min: number; max: number; stated: boolean } {
+  const all = [...textBefore.matchAll(/\bMin\s*(\d+)\s*\/\s*Max\s*(\d+)/gi)];
+  const last = all[all.length - 1];
+  if (!last) return { min: 1, max: 16, stated: false };
+  const min = Math.max(1, Number(last[1]));
+  return { min, max: Math.max(min, Number(last[2])), stated: true };
+}
+
 /** Configures solution/bundle models whose choices are rendered in the Solution Wizard tab. */
 export class SolutionWizard {
   private readonly quantities: QuantityHandler;
@@ -109,9 +118,22 @@ export class SolutionWizard {
     selected.push(await this.selectDhciOption('#dhci_DLFilter_model', 'Server', requestedServer));
     selected.push(await this.selectDhciOption('#dhci_cto_base_model', 'Server Model'));
 
-    const serverQuantity = this.randomInteger(1, 16);
     const quantity = this.page.locator('#dhci_server_qty');
     await expect(quantity, 'dHCI Server quantity').toBeEnabled({ timeout: 30_000 });
+    // The wizard states the range just above the field: "Min 3 / Max 16 Servers can selected" (S3V83A and the
+    // Arcus PC3000 model, 2026-10-20); a random 1-16 could fall below the minimum.
+    const range = wizardRange(await quantity.evaluate((input) => {
+      const root = input.closest('#extended_overview_solutionWizard') ?? document.body;
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      let text = '';
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (input.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING) break;
+        text = `${text} ${node.textContent ?? ''}`.slice(-600);
+      }
+      return text;
+    }));
+    const serverQuantity = this.randomInteger(range.min, range.max);
+    console.log(`[INFO] dHCI Server Qty range: ${range.min}-${range.max}${range.stated ? ' (stated by the wizard)' : ''}`);
     await this.scrollToSelection(quantity, 'dHCI Server quantity');
     await quantity.fill(String(serverQuantity));
     await quantity.press('Tab');

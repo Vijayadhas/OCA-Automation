@@ -38,7 +38,7 @@ export class ModelSearch {
         return (owner?.innerText ?? '').replace(/\s+/g, ' ').trim().slice(0, 400);
       }).filter(Boolean));
     console.log(`[INFO] Configurable card candidates (${cardSummaries.length}): ${cardSummaries.join(' || ') || '<none>'}`);
-    const card = await this.findExactCard(page, modelNumber);
+    const card = await this.findExactCard(page, modelNumber, request.isSolution);
     await expect(card, `Exact configurable card for ${modelNumber} should be visible`).toBeVisible({ timeout: 60_000 });
     const cardText = (await card.innerText()).replace(/\s+/g, ' ');
     if (!request.isSolution && !new RegExp(`\\b${escapeRegex(modelNumber)}\\b`, 'i').test(cardText)) {
@@ -67,7 +67,9 @@ export class ModelSearch {
 
   private async findSearchOption(page: Page, request: ModelSearchRequest): Promise<Locator> {
     const { modelNumber, description, isSolution } = request;
-    const modelPattern = new RegExp(`\\b${escapeRegex(modelNumber)}\\b`, 'i');
+    // A search word ("Private" for the Arcus solution, 2026-10-20) lists entries that need not contain it
+    // ("S3V83A HPE GreenLake for PC3000 with Alletra Storage MP (Block) Wizard"); the description finds those.
+    const modelPattern = new RegExp(`\\b${escapeRegex(modelNumber)}\\b${description ? `|${escapeRegex(description)}` : ''}`, 'i');
     const options = page.locator('ul.ui-autocomplete:not([style*="display: none"]) li.ui-menu-item, [role="option"]')
       .filter({ hasText: modelPattern }).filter({ visible: true });
     let outcome = '';
@@ -134,7 +136,7 @@ export class ModelSearch {
     console.log(`[STEP] Integration Rack: ${requested || 'Standard'} -> ${selectedText}`);
   }
 
-  private async findExactCard(page: Page, modelNumber: string): Promise<Locator> {
+  private async findExactCard(page: Page, modelNumber: string, isSolution = false): Promise<Locator> {
     const container = page.locator('#dqe_cards_container');
     const modelPattern = new RegExp(`\\b${escapeRegex(modelNumber)}\\b`, 'i');
     const action = page.getByRole('button', { name: /Customize|Build|Configure/i })
@@ -155,8 +157,12 @@ export class ModelSearch {
 
     // Solution and bundle identifiers (often S-prefixed) may not be labelled CTO.
     // Accept them only when the exact model text and a configuration action coexist
-    // in the same result card.
-    const cards = container.locator('.dqe-card').filter({ visible: true, hasText: modelPattern });
+    // in the same result card. Solution Template cards (data-type="st") are pre-built configurations: a
+    // search word such as "Private" (Arcus model, 2026-10-20: '"Private" — Wizard') can match them too.
+    const cards = container.locator('.dqe-card:not([data-type="st"])').filter({ visible: true, hasText: modelPattern });
+    // A solution is built in its Wizard ("Build from scratch"), when one of the matching cards is one.
+    const wizardCard = cards.filter({ has: action, hasText: /\bWizard\b/i }).first();
+    if (isSolution && await wizardCard.isVisible().catch(() => false)) return wizardCard;
     const configurableCard = cards.filter({ has: action }).first();
     if (await configurableCard.isVisible().catch(() => false)) return configurableCard;
 
@@ -180,6 +186,8 @@ export class ModelSearch {
     // not the model to build from scratch, so they do not count.
     const configurableCards = container.locator('.dqe-card:not([data-type="st"])').filter({ visible: true, has: action });
     if (await configurableCards.count() === 1) return configurableCards.first();
+    const wizards = configurableCards.filter({ hasText: /\bWizard\b/i });
+    if (isSolution && await wizards.count() === 1) return wizards.first();
     return legacy;
   }
 

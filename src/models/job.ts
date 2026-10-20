@@ -62,6 +62,8 @@ export interface OcaJob {
   modelType?: string;
   /** Advanced Settings Customer Account (Excel "Customer Account"); blank = cleared, or Nutanix for Nutanix models. */
   customerAccount?: string;
+  /** Landing page Country (Excel "Country", e.g. Saudi Arabia or SA); blank = OCA's default, United States. */
+  country?: string;
   isSolution: boolean;
   isStorage: boolean;
   quotationMode: 'aaS';

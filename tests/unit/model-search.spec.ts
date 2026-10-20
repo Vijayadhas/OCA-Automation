@@ -59,3 +59,17 @@ test('opens the Wizard card whose product dropdown carries the model number, not
   await new ModelSearch(page.context()).searchAndOpen(page, { modelNumber: 'S3V83A', isSolution: true });
   expect(await page.evaluate(() => (window as unknown as { clickedCard?: string }).clickedCard)).toBe('wizard');
 });
+
+// Arcus solution in Saudi Arabia (2026-10-20 recording): searched by the word "Private"; the entry to open does not
+// contain it, and a Solution Template card that mentions Private Cloud is listed before the Wizard card.
+test('opens a solution searched by a word through its description and its Wizard card', async ({ page }) => {
+  await page.setContent(wizardResults
+    .replace('<option value="arcusDhciSol" data-displayid="S3V83A" selected>', '<option value="arcusDhciSol" selected>')
+    .replace('"arcusDhciSol" — Wizard', '"Private" — Wizard')
+    .replace('<div id="dqe_cards_container" style="display: none;">',
+      `<div id="dqe_cards_container" style="display: none;">${templateCard('HPE Private Cloud Business Edition Promo')}`));
+  await new ModelSearch(page.context()).searchAndOpen(page, {
+    modelNumber: 'Private', description: 'HPE GreenLake for PC3000 with Alletra Storage MP (Block)', isSolution: true,
+  });
+  expect(await page.evaluate(() => (window as unknown as { clickedCard?: string }).clickedCard)).toBe('wizard');
+});
