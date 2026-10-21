@@ -153,6 +153,7 @@ Main code: `src/automation/component-engine.ts` (`ComponentEngine`),
 | 46 | Arcus solution must be configured in Saudi Arabia; searched by a word ("Private"); Server Qty below the wizard's "Min 3"; fixed Menu quantities | Country field (blank = United States) set on the landing page by its label; search by description and Wizard card; Server Qty within the wizard's stated range; solution Menu picks follow the choice's quantity rule (2026-10-20) |
 | 47 | Arcus EMEA is a model family the user wants to pick like Nutanix, not fill in Country and description each time | `Model Type = Arcus EMEA`: a preset in `MODEL_PRESETS` (Solution route, SAUDI ARABIA, the Arcus description); Excel values win |
 | 48 | Memory rules listing the only allowed quantities ("either 16 or 32 only", "quantities of 2/ 4/ 8/ 16 /24 /32 only") looped without a repair (S0V52A, P68217-B21) | `repairAllowedQuantitiesRule` raises the matching memory total to the next allowed quantity |
+| 49 | Arcus EMEA server (DL365 Gen11): "Turin Processor (9xx5) ... is only compatible with below V2 OS Boot Device only", no V2 boot device available | `limitedProcessorSeries`: swap to a processor outside the series |
 
 ## 5. Manual QA workflow (from the team's training video, 2026-10-14)
 
@@ -210,6 +211,8 @@ End BOM Setup from two models; for Synergy, the configuration dropdown and a com
     P54205-B21 and S4R64A; not yet re-run.
   - Run of 2026-10-21 (on `c18c1a0`): S0V52A (DL560 Gen11) and P68217-B21 (Synergy 480 Gen12) failed
     on memory rules that list the allowed quantities; repair added the same day, not yet re-run.
+  - Arcus EMEA run of 2026-10-21 (on `58f69a4`): Country, search, Wizard, solution Menu and the server inside
+    the solution worked; the server stopped on a Turin processor/V2 boot device rule. Repair added, not yet re-run.
 - Cannot be fixed in the automation (report to the user, not code):
   - No aaS search result: P61268-B21, the DL380a model, P42534-B21 (maybe a typo for P52534-B21).
   - Auto-generate End BOM disabled by OCA ("Use manual"): S2G16A, S2G18A, S6X65A, S3T65A, S3T66A,

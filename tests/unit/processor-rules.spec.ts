@@ -1,5 +1,5 @@
 import { test, expect, type Locator } from '@playwright/test';
-import { ComponentEngine, MAX_RANDOM_PROCESSOR_WATTS, fitQuantity, requiredMemorySpeed, requiredProcessorSeries, requiredProcessorWatts } from '../../src/automation/component-engine';
+import { ComponentEngine, MAX_RANDOM_PROCESSOR_WATTS, fitQuantity, limitedProcessorSeries, requiredMemorySpeed, requiredProcessorSeries, requiredProcessorWatts } from '../../src/automation/component-engine';
 import { resolveConfigurationErrors } from '../../src/automation/configuration-errors';
 import { QuantityHandler } from '../../src/components/quantity-handler';
 import { menuSection, type FixtureRow } from './oca-menu-fixture';
@@ -366,4 +366,26 @@ test('raises the total memory to the next of the quantities a rule lists', async
   await new ComponentEngine(page).satisfyRequiredSection('Memory');
   await expect(page.locator('#item_tr_M64_memX_dimms select')).toHaveValue('2');
   await expect(page.locator('#item_tr_CPU_cpuX_cpus select')).toHaveValue('2');
+});
+
+// Arcus EMEA run, 2026-10-21: the DL365 Gen11 inside the solution had a Turin 9335; every V2 boot device was unavailable.
+test('replaces a processor whose series OCA allows only with products that cannot be picked', async ({ page }) => {
+  const text = 'Turin Processor (9xx5), (quantity one or two) is only compatible with below V2 OS Boot Device only <br> - P78297-B21 HPE NS204i-u V2 Ht Plg Boot Opt Dev<br> - P81160-B21 HPE NS204i-u v2 960GB NVMe HP Boot Dev<br> If there is any request to support 9xx5 processors with older NS204i-u options, please contact DL3x5 Product Management';
+  expect(limitedProcessorSeries(text)?.matches('AMD EPYC 9335 3.0GHz 32-core 210W Processor for HPE')).toBe(false);
+  expect(limitedProcessorSeries(text)?.matches('AMD EPYC 9334 2.7GHz 32-core 210W Processor for HPE')).toBe(true);
+  expect(limitedProcessorSeries('Turin Processor (9xx5) must be selected')).toBeNull();
+  const rule = errorRule(text, [['cpuX_cpus', 'Processors'], ['bootX_boot', 'OS Boot Device']]);
+  await page.setContent(heatsinkSection([
+    { pid: 'TURIN', description: 'AMD EPYC 9335 3.0GHz 32-core 210W Processor for HPE', quantity: 2, select: [0, 1, 2] },
+    { pid: 'HOT', description: 'AMD EPYC 9534 2.45GHz 64-core 280W Processor for HPE', select: [0, 1, 2] },
+    { pid: 'GENOA', description: 'AMD EPYC 9334 2.7GHz 32-core 210W Processor for HPE', select: [0, 1, 2] },
+  ], [], rule, '') + menuSection({ key: 'bootX', title: 'OS Boot Device', choices: [{ id: 'bootX_boot', title: 'OS Boot Device', flagged: true, messages: rule, rows: [
+    { pid: 'OLDBOOT', description: 'HPE NS204i-u Gen11 NVMe Hot Plug Boot Optimized Storage Device', quantity: 1, select: [0, 1] },
+    { pid: 'P81160-B21', description: 'HPE NS204i-u v2 960GB NVMe Hot Plug Boot Optimized Storage Device', unavailable: true, select: [0, 1] },
+  ] }] }));
+  await new ComponentEngine(page).satisfyRequiredSection('Processor');
+  await expect(page.locator('#item_tr_GENOA_cpuX_cpus select')).toHaveValue('2');
+  await expect(page.locator('#item_tr_TURIN_cpuX_cpus select')).toHaveValue('0');
+  await expect(page.locator('#item_tr_HOT_cpuX_cpus select')).toHaveValue('0');
+  await expect(page.locator('#item_tr_OLDBOOT_bootX_boot select')).toHaveValue('1');
 });

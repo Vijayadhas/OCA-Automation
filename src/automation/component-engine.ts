@@ -107,7 +107,21 @@ export function requiredProcessorWatts(text: string): RequiredKind | null {
 
 /** The kind of product a rule requires, if it names one. */
 export function requiredKind(text: string): RequiredKind | null {
-  return requiredProcessorSeries(text) ?? requiredMemorySpeed(text) ?? requiredProcessorWatts(text);
+  return requiredProcessorSeries(text) ?? requiredMemorySpeed(text) ?? requiredProcessorWatts(text) ?? limitedProcessorSeries(text);
+}
+
+/**
+ * A processor series OCA allows only with products the configuration lacks: "Turin Processor (9xx5), (quantity
+ * one or two) is only compatible with below V2 OS Boot Device only - P78297-B21 HPE NS204i-u V2 Ht Plg Boot Opt
+ * Dev - ..." (DL365 Gen11 inside the Arcus solution, 2026-10-21). Every V2 boot device was unavailable, so a
+ * processor outside the series is required instead; x stands for a digit, so 9xx5 matches "AMD EPYC 9335".
+ */
+export function limitedProcessorSeries(text: string): RequiredKind | null {
+  const subject = text.match(/^(.*?)\bis\s+only\s+compatible\s+with\b/i)?.[1] ?? '';
+  const name = /\bprocessors?\b/i.test(subject) ? subject.match(/\b(\d+x+\d*)\b/i)?.[1] : undefined;
+  if (!name) return null;
+  const pattern = new RegExp(`\\b${name.replace(/x+/gi, (run) => `\\d{1,${run.length}}`)}\\b`);
+  return { name: `a processor outside the ${name} series`, matches: (description) => !pattern.test(description) };
 }
 
 /**
@@ -843,7 +857,8 @@ export class ComponentEngine {
     for (const rule of await this.choiceRules(choice.id)) {
       const kind = requiredKind(rule.ownText);
       if (!kind) continue;
-      const targets = [...new Set([choice.id, ...rule.targets])];
+      // The required product is put in Processor or Memory only (the 9xx5 rule's boot devices are left to OCA).
+      const targets = await this.mandatoryChoiceIds([...new Set([choice.id, ...rule.targets])]);
       await this.openOwners(targets);
       for (const target of targets) {
         const existing = await this.existingSelection(target);
@@ -922,7 +937,9 @@ export class ComponentEngine {
       if (!match) continue;
       const allowed = match[2].split(/\D+/).filter(Boolean).map(Number).sort((a, b) => a - b);
       const subject = match[1].replace(/\b\d+\b/g, ' ');
-      const targets = rule.targets.length ? rule.targets : [choice.id];
+      // Only Processor and Memory quantities are changed; other sections are left to OCA.
+      const targets = await this.mandatoryChoiceIds(rule.targets.length ? rule.targets : [choice.id]);
+      if (!targets.length) continue;
       await this.openOwners(targets);
       const titles = await this.page.evaluate((ids) => ids.map((id) =>
         (document.getElementById(`choice_title_${id}`)?.textContent ?? '').replace(/\s+/g, ' ').trim()), targets);
@@ -944,9 +961,20 @@ export class ComponentEngine {
     return false;
   }
 
+  /** Keys of the Processor and Memory sections, the only mandatory parts a repair may change on its own. */
+  private async mandatoryKeys(): Promise<string[]> {
+    return (await this.sections()).filter((section) => /^(processors?|memory)$/i.test(section.title)).map((section) => section.key);
+  }
+
+  /** The choice ids that belong to the Processor or Memory section. */
+  private async mandatoryChoiceIds(choiceIds: string[]): Promise<string[]> {
+    const keys = await this.mandatoryKeys();
+    return choiceIds.filter((id) => keys.some((key) => id.startsWith(`${key}_`)));
+  }
+
   /** Choices of the Processor and Memory sections OCA flags as errors now. */
   private async flaggedMandatoryChoices(): Promise<string[]> {
-    const keys = (await this.sections()).filter((section) => /^(processors?|memory)$/i.test(section.title)).map((section) => section.key);
+    const keys = await this.mandatoryKeys();
     if (!keys.length) return [];
     return this.page.evaluate((prefixes) => Array.from(document.querySelectorAll('[id^="choice_status_icon_"].img-alert'))
       .map((icon) => icon.id.slice('choice_status_icon_'.length))
