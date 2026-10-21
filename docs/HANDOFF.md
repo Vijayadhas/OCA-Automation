@@ -152,6 +152,7 @@ Main code: `src/automation/component-engine.ts` (`ComponentEngine`),
 | 45 | Solution model's server ("DL385 Gen11 #1") not found by the wizard name | Matched by part number in OCA's navigation tree; return to the solution by breadcrumb, else the tree |
 | 46 | Arcus solution must be configured in Saudi Arabia; searched by a word ("Private"); Server Qty below the wizard's "Min 3"; fixed Menu quantities | Country field (blank = United States) set on the landing page by its label; search by description and Wizard card; Server Qty within the wizard's stated range; solution Menu picks follow the choice's quantity rule (2026-10-20) |
 | 47 | Arcus EMEA is a model family the user wants to pick like Nutanix, not fill in Country and description each time | `Model Type = Arcus EMEA`: a preset in `MODEL_PRESETS` (Solution route, SAUDI ARABIA, the Arcus description); Excel values win |
+| 48 | Memory rules listing the only allowed quantities ("either 16 or 32 only", "quantities of 2/ 4/ 8/ 16 /24 /32 only") looped without a repair (S0V52A, P68217-B21) | `repairAllowedQuantitiesRule` raises the matching memory total to the next allowed quantity |
 
 ## 5. Manual QA workflow (from the team's training video, 2026-10-14)
 
@@ -207,6 +208,8 @@ End BOM Setup from two models; for Synergy, the configuration dropdown and a com
   - Run of 2026-10-19 (Gen11, on `d6ed8b2`): 21 of 42 models built an End BOM. The fixes of
     2026-10-20 target P53934-B21, P67161-B21, P54960-B21, P54961-B21, P55432-B21, P52536-B21,
     P54205-B21 and S4R64A; not yet re-run.
+  - Run of 2026-10-21 (on `c18c1a0`): S0V52A (DL560 Gen11) and P68217-B21 (Synergy 480 Gen12) failed
+    on memory rules that list the allowed quantities; repair added the same day, not yet re-run.
 - Cannot be fixed in the automation (report to the user, not code):
   - No aaS search result: P61268-B21, the DL380a model, P42534-B21 (maybe a typo for P52534-B21).
   - Auto-generate End BOM disabled by OCA ("Use manual"): S2G16A, S2G18A, S6X65A, S3T65A, S3T66A,

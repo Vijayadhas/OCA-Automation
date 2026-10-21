@@ -339,3 +339,31 @@ test('fills an empty choice whose own rule asks for a minimum of two', async ({ 
   await new ComponentEngine(page).satisfyRequiredSection('Processor');
   await expect(page.locator('#item_tr_HEAT_cpuX_heat select')).toHaveValue('2');
 });
+
+// 2026-10-21 run: S0V52A (DL560 Gen11) had 2 x 96GB kits, P68217-B21 (Synergy 480 Gen12) 1 x 64GB kit.
+const memorySection = (rows: FixtureRow[], rules = '') => menuSection({ key: 'memX', title: 'Memory', choices: [
+  { id: 'memX_dimms', title: 'Memory', flagged: Boolean(rules), messages: rules || undefined, rows },
+] });
+const links: Array<[string, string]> = [['cpuX_cpus', 'Processors'], ['memX_dimms', 'Memory']];
+
+test('raises the memory kits a rule names to the next quantity it allows', async ({ page }) => {
+  const rule = errorRule('In 2 processor configurations, the allowed qty of 96GB Memory is either 16 or 32 only.', links);
+  await page.setContent(heatsinkSection([{ pid: 'CPU', description: 'Intel Xeon-Gold 6416H 2.2GHz 18-core 165W Processor for HPE', quantity: 2, select: [0, 1, 2] }], [], rule, '')
+    + memorySection([
+      { pid: 'M96', description: 'HPE 96GB (1x96GB) Dual Rank x4 DDR5-4800 CAS-46-45-45 EC8 Registered Smart FIO Memory Kit', quantity: 2, select: [0, 2, 8, 16, 32] },
+      { pid: 'M32', description: 'HPE 32GB (1x32GB) Dual Rank x8 DDR5-4800 CAS-40-39-39 EC8 Registered Smart FIO Memory Kit', select: [0, 2, 8, 16, 32] },
+    ], rule));
+  await new ComponentEngine(page).satisfyRequiredSection('Processor');
+  await expect(page.locator('#item_tr_M96_memX_dimms select')).toHaveValue('16');
+  await expect(page.locator('#item_tr_M32_memX_dimms select')).toHaveValue('0');
+  await expect(page.locator('#item_tr_CPU_cpuX_cpus select')).toHaveValue('2');
+});
+
+test('raises the total memory to the next of the quantities a rule lists', async ({ page }) => {
+  const rule = errorRule('CTO Model with 2 Processors, memory min 2 // Max 32<br> Total Memory selection must be in quantities of 2/ 4/ 8/ 16 /24 /32 only', links);
+  await page.setContent(heatsinkSection([{ pid: 'CPU', description: 'Intel Xeon 6 6730P 2.5GHz 32-core 250W Processor for HPE', quantity: 2, select: [0, 1, 2] }], [], '', '')
+    + memorySection([{ pid: 'M64', description: 'HPE 64GB (1x64GB) Dual Rank x4 DDR5-6400 CAS-52-52-52 EC8 Registered Smart FIO Memory Kit', quantity: 1, select: [0, 1, 2, 4] }], rule));
+  await new ComponentEngine(page).satisfyRequiredSection('Memory');
+  await expect(page.locator('#item_tr_M64_memX_dimms select')).toHaveValue('2');
+  await expect(page.locator('#item_tr_CPU_cpuX_cpus select')).toHaveValue('2');
+});

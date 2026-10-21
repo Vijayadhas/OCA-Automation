@@ -907,6 +907,43 @@ export class ComponentEngine {
     return false;
   }
 
+  /**
+   * A rule that lists the only quantities allowed, e.g. "In 2 processor configurations, the allowed qty of 96GB
+   * Memory is either 16 or 32 only. (Processors, Memory)" (S0V52A, DL560 Gen11: 2 kits) or "CTO Model with 2
+   * Processors, memory min 2 // Max 32 Total Memory selection must be in quantities of 2/ 4/ 8/ 16 /24 /32 only"
+   * (P68217-B21, Synergy 480 Gen12: 1 kit). The words before the list ("96GB Memory", "Total Memory") pick the
+   * covered choice and its products by title and description; their total is raised to the next allowed quantity.
+   */
+  private async repairAllowedQuantitiesRule(choice: MenuChoice): Promise<boolean> {
+    const list = String.raw`(\d+(?:\s*(?:\/|,|\bor\b|\band\b)\s*\d+)+)\s+only\b`;
+    for (const rule of await this.choiceRules(choice.id)) {
+      const match = rule.ownText.match(new RegExp(String.raw`\ballowed\s+(?:qty|quantit(?:y|ies))\s+of\s+(.+?)\s+is\s+(?:either\s+)?${list}`, 'i'))
+        ?? rule.ownText.match(new RegExp(String.raw`(\S+(?:\s+\S+){0,2})\s+(?:selection\s+)?(?:must\s+be\s+)?in\s+quantities\s+of\s+${list}`, 'i'));
+      if (!match) continue;
+      const allowed = match[2].split(/\D+/).filter(Boolean).map(Number).sort((a, b) => a - b);
+      const subject = match[1].replace(/\b\d+\b/g, ' ');
+      const targets = rule.targets.length ? rule.targets : [choice.id];
+      await this.openOwners(targets);
+      const titles = await this.page.evaluate((ids) => ids.map((id) =>
+        (document.getElementById(`choice_title_${id}`)?.textContent ?? '').replace(/\s+/g, ' ').trim()), targets);
+      const rows = (await Promise.all(targets.map(async (id, index) => (await this.rowInfo(this.choiceRows(id)))
+        .filter((row) => row.productNumber && this.committedQuantity(row) > 0 && !isDimmBlank(row.description))
+        .map((row) => ({ ...row, score: phraseScore(subject, `${titles[index]} ${row.description}`) }))))).flat();
+      const best = Math.max(0, ...rows.map((row) => row.score));
+      const counted = rows.filter((row) => best > 0 && row.score === best);
+      const total = counted.reduce((sum, row) => sum + this.committedQuantity(row), 0);
+      if (!counted.length || allowed.includes(total)) continue;
+      const wanted = allowed.find((value) => value > total) ?? allowed[allowed.length - 1];
+      const row = [...counted].sort((a, b) => this.committedQuantity(b) - this.committedQuantity(a))[0];
+      const quantity = this.committedQuantity(row) + wanted - total;
+      if (quantity <= 0) continue;
+      console.log(`[STEP] OCA rule "${rule.ownText}": ${total} selected; setting ${row.productNumber} to ${quantity} for a total of ${wanted}`);
+      await this.quantities.set(this.page.locator(`[id=${JSON.stringify(row.id)}]`), row.productNumber, quantity, false, { acceptOffered: true });
+      return true;
+    }
+    return false;
+  }
+
   /** Choices of the Processor and Memory sections OCA flags as errors now. */
   private async flaggedMandatoryChoices(): Promise<string[]> {
     const keys = (await this.sections()).filter((section) => /^(processors?|memory)$/i.test(section.title)).map((section) => section.key);
@@ -1103,6 +1140,9 @@ export class ComponentEngine {
     }
     for (const choice of flagged) {
       if (await this.repairMatchRule(choice)) return;
+    }
+    for (const choice of flagged) {
+      if (await this.repairAllowedQuantitiesRule(choice)) return;
     }
     for (const choice of flagged) {
       if (await this.repairFlaggedChoice(choice, !randomized)) return;
