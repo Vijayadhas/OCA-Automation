@@ -1,6 +1,6 @@
 import { resolveConfigurationErrors, type ResolveOptions } from './configuration-errors';
 import { expect, type BrowserContext, type Page } from '@playwright/test';
-import { customerAccountFor, searchDescriptionFor, type OcaJob } from '../models/job';
+import { countryFor, customerAccountFor, searchDescriptionFor, type OcaJob } from '../models/job';
 import { CustomerAccount } from './customer-account';
 import { Country } from './country';
 import type { AutomationResult } from '../models/automation-result';
@@ -77,15 +77,16 @@ export class OcaEngine {
     this.currentStep = 'Select aaS';
     await this.measure('Select aaS and verify landing', () => this.selectAasAndVerifyLanding());
     // Customer Account stays set in OCA between models, so each model sets its own or clears it.
-    // Country: the Excel value (e.g. Saudi Arabia for the Arcus solution), else OCA's default, United States.
+    // Country: the Excel value, else the Model Type preset's (Arcus EMEA: Saudi Arabia), else OCA's default, United States.
     this.currentStep = 'Set Country';
-    await this.measure('Set Country', () => new Country(this.activePage).apply(job.country));
+    await this.measure('Set Country', () => new Country(this.activePage).apply(countryFor(job)));
     this.currentStep = 'Set Customer Account';
     await this.measure('Set Customer Account', () => new CustomerAccount(this.activePage).apply(customerAccountFor(job)));
     this.currentStep = 'Search model';
-    const route = job.isStorage ? 'Storage' : job.isSolution ? 'Solution' : job.modelType === 'Nutanix' ? 'Nutanix (Server route)' : 'Server';
+    const basicRoute = job.isStorage ? 'Storage' : job.isSolution ? 'Solution' : 'Server';
+    const route = job.modelType && job.modelType !== basicRoute ? `${job.modelType} (${basicRoute} route)` : basicRoute;
     const description = searchDescriptionFor(job);
-    console.log(`[INFO] Excel model selection: model type=${job.modelType ? route : `<blank>, treated as ${route}`}; description=${description ?? '<blank>'}; customer account=${customerAccountFor(job) || '<none>'}; country=${job.country ?? '<blank>'}; integration rack=${job.integrationRackPartNumber ?? '<blank>'}`);
+    console.log(`[INFO] Excel model selection: model type=${job.modelType ? route : `<blank>, treated as ${route}`}; description=${description ?? '<blank>'}; customer account=${customerAccountFor(job) || '<none>'}; country=${countryFor(job) ?? '<blank>, OCA default'}; integration rack=${job.integrationRackPartNumber ?? '<blank>'}`);
     const model = await this.measure('Search and open model', () =>
       new ModelSearch(this.context).searchAndOpen(this.activePage, {
         modelNumber: job.modelNumber,

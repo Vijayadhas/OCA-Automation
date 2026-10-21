@@ -19,12 +19,14 @@ const instructions: Array<[string, string, string]> = [
   ['Model Number', 'Required', 'Exact OCA model, e.g. P75399-B21, S3V83A.'],
   ['Model Type', `${MODEL_TYPES.join(' / ')} or blank`, 'Server: Menu tab. Solution: Solution Wizard. Storage: storage flow. '
     + 'Nutanix: Customer Account set to Nutanix in Advanced Settings, the search result containing "Nutanix" is opened, '
-    + 'then the Server route. Blank: detected from OCA.'],
+    + 'then the Server route. Arcus EMEA: the Arcus solution (HPE GreenLake for PC3000 with Alletra Storage MP (Block)) '
+    + 'in SAUDI ARABIA, built in its Wizard; Model Number is the search word, e.g. Private. Blank: detected from OCA.'],
   ['Model Description', 'Optional', 'Text the OCA search result must contain, when the model has several results. '
-    + 'Nutanix models use "Nutanix" when blank.'],
+    + 'Nutanix models use "Nutanix" when blank; Arcus EMEA uses the Arcus solution name.'],
   ['Customer Account', 'Optional', 'Advanced Settings Customer Account, exactly as OCA lists it. Blank: cleared '
     + '(Nutanix models: Nutanix).'],
-  ['Country', 'Optional', 'Landing page Country, as OCA lists it (e.g. SAUDI ARABIA) or its code (SA). Blank: UNITED STATES.'],
+  ['Country', 'Optional', 'Landing page Country, as OCA lists it (e.g. SAUDI ARABIA) or its code (SA). Blank: UNITED STATES '
+    + '(Arcus EMEA: SAUDI ARABIA).'],
   ['Service Type', 'Optional', 'Random (default) or the service experience to select.'],
   ['Server', 'Optional', 'Solution models: the server to pick in the Solution Wizard.'],
   ['Integration Rack Part number', 'Optional', 'Blank: Standalone. Yes: any rack. Or the rack option text.'],
@@ -63,6 +65,8 @@ export function buildInputTemplate(): XLSX.WorkBook {
     // Arcus: HPE GreenLake for PC3000 with Alletra Storage MP (Block), configured in Saudi Arabia (2026-10-20).
     ['JOB-013', 'S3V83A', 'Solution', 'HPE GreenLake for PC3000 with Alletra Storage MP (Block)', '', 'SAUDI ARABIA', 'Random', '', '', '',
       'Yes', 'Yes', 'Arcus dHCI solution in Saudi Arabia (same product as JOB-011). New: Country; retest.'],
+    // The same Arcus solution through its preset Model Type, searched by "Private" as recorded (2026-10-21).
+    model('JOB-014', 'Private', 'Arcus EMEA', 'Arcus EMEA preset: Saudi Arabia and the Arcus description filled in. New; test.'),
   ];
   // No component rows: every model gets random Processor, Memory, Smart Chassis and Power Supplies.
   const components: unknown[][] = [];

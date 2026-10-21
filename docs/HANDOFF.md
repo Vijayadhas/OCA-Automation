@@ -21,11 +21,12 @@ row in an Excel workbook it:
 
 1. Opens OCA in a persistent Chromium profile (the user signs in manually once).
 2. Selects **aaS** mode on the landing page (mandatory), then the **Country** (Excel `Country`,
-   blank = UNITED STATES) and the Advanced Settings **Customer Account** (Nutanix models: Nutanix).
+   blank = UNITED STATES; Arcus EMEA models: SAUDI ARABIA) and the Advanced Settings **Customer Account**
+   (Nutanix models: Nutanix).
 3. Searches the model number (or a search word plus Model Description) and clicks **Customize**
    (Integration Rack: blank → Standard/Standalone). Solutions open their Wizard card.
    - **Server / Nutanix:** Menu tab, steps 4-5.
-   - **Solution:** Solution Wizard (dHCI: solution type, server, server model, Server Qty within the
+   - **Solution / Arcus EMEA:** Solution Wizard (dHCI: solution type, server, server model, Server Qty within the
      wizard's Min/Max, adapter, switch), the solution Menu (Node Chassis, Node, Capacity, DAC Cables),
      then each server inside the solution from OCA's navigation tree, configured like a server.
    - **Storage:** storage flow (Capacity etc.).
@@ -39,9 +40,11 @@ row in an Excel workbook it:
 
 Inputs: the Excel template (`input/OCA-Input-Template.xlsx`, `npm run template:excel`, or the dashboard's
 "Download Excel template") has one row per model: Job ID, Model Number, Model Type (Server / Solution /
-Storage / Nutanix), Model Description, Customer Account, Country, Service Type, Server, Integration Rack,
-Solution Name, Generate End BOM, Enabled. Rows JOB-001 to JOB-012 are models already run; JOB-013 is
-the Arcus solution still to verify.
+Storage / Nutanix / Arcus EMEA), Model Description, Customer Account, Country, Service Type, Server, Integration Rack,
+Solution Name, Generate End BOM, Enabled. Rows JOB-001 to JOB-012 are models already run; JOB-013 (Solution +
+Country) and JOB-014 (Arcus EMEA preset, search word "Private") are the Arcus solution still to verify.
+Preset Model Types live in `MODEL_PRESETS` (`src/models/job.ts`): each fills in its route, Customer Account,
+search description and Country when the Excel cells are blank. A new model family is one entry there.
 
 Entry points: `npm run oca` (CLI, `src/main.ts`) and `npm run ui` (web dashboard on port 4173,
 `src/app/ui-server.ts`). On Windows the user runs `Run-OCA.cmd` / `Run-OCA-UI.cmd`.
@@ -148,6 +151,7 @@ Main code: `src/automation/component-engine.ts` (`ComponentEngine`),
 | 44 | OCA disables Auto-generate End BOM ("Currently not supported for auto generation. Use manual") for Cohesity/Veeam-type S-models | Reported at once: configuration saved, End BOM must be made manually (open question to the user whether to automate the manual End BOM) |
 | 45 | Solution model's server ("DL385 Gen11 #1") not found by the wizard name | Matched by part number in OCA's navigation tree; return to the solution by breadcrumb, else the tree |
 | 46 | Arcus solution must be configured in Saudi Arabia; searched by a word ("Private"); Server Qty below the wizard's "Min 3"; fixed Menu quantities | Country field (blank = United States) set on the landing page by its label; search by description and Wizard card; Server Qty within the wizard's stated range; solution Menu picks follow the choice's quantity rule (2026-10-20) |
+| 47 | Arcus EMEA is a model family the user wants to pick like Nutanix, not fill in Country and description each time | `Model Type = Arcus EMEA`: a preset in `MODEL_PRESETS` (Solution route, SAUDI ARABIA, the Arcus description); Excel values win |
 
 ## 5. Manual QA workflow (from the team's training video, 2026-10-14)
 
@@ -194,7 +198,7 @@ End BOM Setup from two models; for Synergy, the configuration dropdown and a com
   **Share (zip)** button, `a988b78` Country field and Arcus solution (row 46), then this document.
   Before that, `d6ed8b2` (2026-10-19) and `eb234d6` (2026-10-18). Check `git log` for later ones.
 - New model to verify: the **Arcus** solution (S3V83A, "HPE GreenLake for PC3000 with Alletra Storage
-  MP (Block)") configured in **Saudi Arabia**, template row JOB-013. Built from the user's Playwright
+  MP (Block)") configured in **Saudi Arabia**, template rows JOB-013 and JOB-014 (Model Type **Arcus EMEA**). Built from the user's Playwright
   recording only; the Country step and the DL360 Gen12 server inside the solution are not yet run on OCA.
 - Run results so far, by family (each family is one batch of 4-14 models):
   - Confirmed working end to end on OCA: DL360/DL320/DL340/DL380 Gen12 servers, DL580 Gen12
@@ -219,7 +223,8 @@ End BOM Setup from two models; for Synergy, the configuration dropdown and a com
 0. Every log starts with `[INFO] Code version:`. Compare it with `git log -1` (remember the Pacific
    time shift for zip downloads) before diagnosing; ask for a re-run if it is older.
 1. Ask the user to download the zip again and re-run the failed models listed in section 6.
-2. Run the Arcus solution in Saudi Arabia (input template JOB-013, Country = SAUDI ARABIA) with
+2. Run the Arcus solution in Saudi Arabia (input template JOB-014, Model Type Arcus EMEA;
+   or JOB-013) with
    Capture HTML on, and check the Country step and the server inside the solution.
 3. Open questions to the user (no answer yet):
    - Should the automation build a **manual End BOM** for models whose Auto-generate is disabled,
