@@ -106,7 +106,11 @@ export class SolutionWizard {
     for (let pick = 1; pick <= maxPicks; pick += 1) {
       const messages = await wizardMessages(root);
       if (pick === 1 && messages.length) console.log(`[INFO] Solution Wizard messages: ${messages.join(' || ')}`);
-      const fields = (await wizardFields(selects)).filter((item) => item.shown)
+      const shown = (await wizardFields(selects)).filter((item) => item.shown);
+      // OCA marks the wizard's mandatory dropdowns (class requiredChoice, red icon when missing); when it
+      // does, only those are filled and the optional ones stay at "None.".
+      const marked = shown.some((item) => item.required);
+      const fields = shown.filter((item) => !marked || item.required)
         .map((field) => ({ ...field, minimum: field.numeric ? minimumFor(field.label, messages) : 0 }))
         .filter((field) => !skipped.has(field.index) && (field.empty || field.minimum > Number(field.value)));
       const field = fields[0];
@@ -330,32 +334,34 @@ export class SolutionWizard {
       const disabledIds = await disabled.evaluateAll((nodes) => nodes.map((node) => node.id || '<unnamed>').join(', '));
       console.log(`[INFO] Ignoring disabled Solution Wizard checkbox(es): ${disabledIds}`);
     }
-    const checkboxes = root.locator([
-      '.wizard_checkbox input[type="checkbox"]:not(:disabled)',
-      'input#dhciarcus_acknowledge_checkbox:not(:disabled)',
-    ].join(', '));
+    const checkboxes = root.locator('.wizard_checkbox input[type="checkbox"]:not(:disabled), input[id*="acknowledge" i]:not(:disabled)');
     const count = await checkboxes.count();
-    if (!count) {
-      console.log('[INFO] Solution Wizard acknowledgement checkbox is not present; continuing');
-      return;
-    }
+    let acknowledged = 0;
 
     for (let index = 0; index < count; index += 1) {
       const checkbox = checkboxes.nth(index);
       if (await checkbox.isChecked().catch(() => false)) continue;
       const id = await checkbox.getAttribute('id');
+      const acknowledgement = ((await checkbox.locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " wizard_checkbox ")][1]')
+        .innerText().catch(() => '')) ?? '').replace(/\s+/g, ' ').trim();
+      // Only acknowledgements are ticked. The other wizard checkboxes add optional products (rail kit, bezel
+      // lock, TAA, cable tray, upgrade, ...), which are not mandatory (SimpliVity run, 2026-10-21).
+      if (!/acknowledg/i.test(`${id ?? ''} ${acknowledgement}`)) continue;
       const label = id
         ? root.locator(`label[for="${id}"]`).first()
         : checkbox.locator('xpath=following-sibling::label[1]');
-      await expect(label, 'Solution Wizard acknowledgement checkbox label').toBeVisible({ timeout: 10_000 });
+      if (!await label.isVisible().catch(() => false)) {
+        console.log(`[INFO] Solution Wizard acknowledgement ${id ?? acknowledgement} is hidden; leaving it`);
+        continue;
+      }
       await this.scrollToSelection(label, 'Solution Wizard acknowledgement');
-      const acknowledgement = ((await checkbox.locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " wizard_checkbox ")][1]')
-        .innerText().catch(() => '')) ?? '').replace(/\s+/g, ' ').trim();
       console.log(`[STEP] Enabling Solution Wizard acknowledgement${acknowledgement ? `: ${acknowledgement}` : ''}`);
+      acknowledged += 1;
       await label.click({ force: true });
       await waitForBlockingOverlay(this.page);
       await expect(checkbox, 'Solution Wizard acknowledgement must remain checked').toBeChecked({ timeout: 10_000 });
     }
+    if (!acknowledged) console.log('[INFO] No Solution Wizard acknowledgement to tick; continuing');
   }
 
   private async selectChoice(choice: WizardChoice): Promise<SolutionWizardSelection | undefined> {
@@ -450,6 +456,7 @@ interface WizardField {
   index: number;
   label: string;
   shown: boolean;
+  required: boolean;
   empty: boolean;
   numeric: boolean;
   value: string;
@@ -476,6 +483,7 @@ async function wizardFields(selects: Locator): Promise<WizardField[]> {
       index,
       label: label.replace(/[*:]+$/, '').trim(),
       shown: Boolean(field?.offsetParent) && !select.disabled,
+      required: select.classList.contains('requiredChoice') || select.classList.contains('missingSelection'),
       empty: !current || /please make a selection/i.test(current),
       numeric: values.length > 0 && values.every((option) => /^\d+$/.test(option.text)),
       value: current,
@@ -486,7 +494,7 @@ async function wizardFields(selects: Locator): Promise<WizardField[]> {
 
 /** Visible error and warning texts in the wizard. */
 async function wizardMessages(root: Locator): Promise<string[]> {
-  const texts = await root.locator('.error_message, .warning_message, [class*="error" i], [class*="alert" i]')
+  const texts = await root.locator('.error_message, .warning_message, .status-messaging, [class*="error" i], [class*="alert" i]')
     .evaluateAll((nodes) => nodes.filter((node) => (node as HTMLElement).offsetParent)
       .map((node) => (node.textContent ?? '').replace(/\s+/g, ' ').trim())
       .filter((text) => text && text.length <= 300));

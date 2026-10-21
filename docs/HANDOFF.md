@@ -26,8 +26,9 @@ row in an Excel workbook it:
 3. Searches the model number (or a search word plus Model Description) and clicks **Customize**
    (Integration Rack: blank → Standard/Standalone). Solutions open their Wizard card.
    - **Server / Nutanix:** Menu tab, steps 4-5.
-   - **Simplivity Wizard:** the model's Wizard card (not its CTO card); Processor, Memory, then every wizard
-     dropdown still at "Please make a selection." and the minimum quantities the wizard's messages state.
+   - **Simplivity Wizard:** the model's Wizard card (not its CTO card); Processor, Memory, then every mandatory
+     wizard dropdown (`requiredChoice`) still at "Please make a selection." and the minimum quantities the wizard's
+     messages state. Optional dropdowns and product checkboxes are left alone.
    - **Solution / Arcus EMEA:** Solution Wizard (dHCI: solution type, server, server model, Server Qty within the
      wizard's Min/Max, adapter, switch), the solution Menu (Node Chassis, Node, Capacity, DAC Cables),
      then each server inside the solution from OCA's navigation tree, configured like a server.
@@ -157,6 +158,7 @@ Main code: `src/automation/component-engine.ts` (`ComponentEngine`),
 | 48 | Memory rules listing the only allowed quantities ("either 16 or 32 only", "quantities of 2/ 4/ 8/ 16 /24 /32 only") looped without a repair (S0V52A, P68217-B21) | `repairAllowedQuantitiesRule` raises the matching memory total to the next allowed quantity |
 | 49 | Arcus EMEA server (DL365 Gen11): "Turin Processor (9xx5) ... is only compatible with below V2 OS Boot Device only", no V2 boot device available | `limitedProcessorSeries`: swap to a processor outside the series |
 | 50 | SimpliVity models have a CTO card and a Wizard card; the user wants the Wizard; the wizard's fixed choice list did not fit every SimpliVity | `Model Type = Simplivity Wizard`; `findWizardCard`; `completeWizard` fills the dropdowns still empty and the minimum quantities the wizard states |
+| 51 | Simplivity Wizard run: every wizard checkbox was ticked as an acknowledgement (optional rail kit, bezel lock, intrusion kit) and a hidden one (`include_encryption`) failed the run | Only "acknowledge" checkboxes are ticked, hidden ones skipped; only `requiredChoice` dropdowns are filled |
 
 ## 5. Manual QA workflow (from the team's training video, 2026-10-14)
 
@@ -216,8 +218,9 @@ End BOM Setup from two models; for Synergy, the configuration dropdown and a com
     on memory rules that list the allowed quantities; repair added the same day, not yet re-run.
   - Arcus EMEA run of 2026-10-21 (on `58f69a4`): Country, search, Wizard, solution Menu and the server inside
     the solution worked; the server stopped on a Turin processor/V2 boot device rule. Repair added, not yet re-run.
-- New model type to verify: **Simplivity Wizard** (JOB-015 S8J33A, JOB-016 S2V31A), built from recordings only.
-  Ask for a run with Capture HTML: the "Solution Wizard configured" capture shows the wizard's real labels and messages.
+- New model type to verify: **Simplivity Wizard** (JOB-015 S8J33A, JOB-016 S2V31A). First run (JOB-016, on `1d95649`)
+  opened the Wizard card and failed on a hidden checkbox; fixed the same day (only acknowledgements ticked, only
+  mandatory dropdowns filled), not yet re-run. The wizard's HTML is in that run's FAILED capture.
 - Cannot be fixed in the automation (report to the user, not code):
   - No aaS search result: P61268-B21, the DL380a model, P42534-B21 (maybe a typo for P52534-B21).
   - Auto-generate End BOM disabled by OCA ("Use manual"): S2G16A, S2G18A, S6X65A, S3T65A, S3T66A,
