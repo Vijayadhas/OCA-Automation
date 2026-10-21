@@ -116,6 +116,7 @@ export class OcaEngine {
       const selections = await this.measure('Configure Solution Wizard', () =>
         new SolutionWizard(this.activePage).configure(instructions, job.server));
       result.selectedComponents = selections.map((item) => `${item.label}: ${item.text}`).join('; ');
+      await this.options.html?.step(this.activePage, 'Solution Wizard configured');
       // dHCI solutions (S3V83A) hold their servers as separate configurations; Processor and Memory are set there.
       const serverModel = selections.find((item) => /^Server Model$/i.test(item.label));
       if (serverModel) {

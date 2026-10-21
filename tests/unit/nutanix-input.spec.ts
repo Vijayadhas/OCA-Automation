@@ -31,6 +31,9 @@ test('Arcus EMEA is a Solution preset with Saudi Arabia and the Arcus search res
   expect(customerAccountFor({ modelType: 'Arcus EMEA' })).toBe('');
   expect(countryFor({ modelType: 'Arcus EMEA', country: 'UAE' })).toBe('UAE');
   expect(countryFor({ modelType: 'Solution' })).toBeUndefined();
+  // SimpliVity models built in their Wizard card: the Solution route, no other preset values.
+  expect(routeFromModelType(parseModelType('simplivity wizard'), { isSolution: false, isStorage: false })).toEqual({ modelType: 'Simplivity Wizard', isSolution: true, isStorage: false });
+  expect([countryFor({ modelType: 'Simplivity Wizard' }), searchDescriptionFor({ modelType: 'Simplivity Wizard' })]).toEqual([undefined, undefined]);
 });
 
 test('the input template has every dialog field and reads back as runnable jobs', () => {
@@ -41,8 +44,8 @@ test('the input template has every dialog field and reads back as runnable jobs'
   expect(XLSX.utils.sheet_to_json<string[]>(workbook.Sheets.Models, { header: 1 })[0]).toEqual([...TEMPLATE_MODEL_COLUMNS, 'Notes']);
 
   const jobs = new ExcelReader().read(file);
-  expect(jobs).toHaveLength(14);
-  expect(new Set(jobs.map((job) => job.jobId)).size).toBe(14);
+  expect(jobs).toHaveLength(16);
+  expect(new Set(jobs.map((job) => job.jobId)).size).toBe(16);
   const byId = (jobId: string) => jobs.find((job) => job.jobId === jobId)!;
   expect([byId('JOB-010').modelNumber, byId('JOB-010').modelType, byId('JOB-010').isSolution]).toEqual(['P72176-B21', 'Nutanix', false]);
   expect([byId('JOB-011').modelNumber, byId('JOB-011').isSolution]).toEqual(['S3V83A', true]);

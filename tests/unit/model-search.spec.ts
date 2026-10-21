@@ -73,3 +73,20 @@ test('opens a solution searched by a word through its description and its Wizard
   });
   expect(await page.evaluate(() => (window as unknown as { clickedCard?: string }).clickedCard)).toBe('wizard');
 });
+
+// SimpliVity 380 Gen12 (2026-10-21 recording): "S8J33A" — CTO is listed beside "simplivity380Gen12" — Wizard.
+test('a solution offered as a CTO card and a Wizard card opens the Wizard card', async ({ page }) => {
+  await page.setContent(wizardResults
+    .replace('S3V83A HPE GreenLake for PC3000 with Alletra Storage MP (Block) Wizard - -', 'S8J33A HPE SimpliVity 380 Gen12 VMEssentials / VMWare - -')
+    .replace('"arcusDhciSol" — Wizard', '"simplivity380Gen12" — Wizard')
+    .replace('data-displayid="S3V83A"', 'data-displayid="S8J33A"')
+    .replace('<div id="dqe_cards_container" style="display: none;">', `<div id="dqe_cards_container" style="display: none;">
+      <div class="dqe-card card-type-catalog" data-type="cto"><span class="category">"S8J33A" — CTO</span>
+        <span class="name">Build from scratch with no pre-selections</span>${customize('cto')}</div>`));
+  await new ModelSearch(page.context()).searchAndOpen(page, { modelNumber: 'S8J33A', isSolution: true });
+  expect(await page.evaluate(() => (window as unknown as { clickedCard?: string }).clickedCard)).toBe('wizard');
+  await page.setContent(wizardResults.replace('S3V83A HPE GreenLake', 'S8J33A HPE GreenLake').replace('<div id="dqe_cards_container" style="display: none;">',
+    `<div id="dqe_cards_container" style="display: none;"><div class="dqe-card card-type-catalog" data-type="cto"><span class="category">"S8J33A" — CTO</span>${customize('cto')}</div>`));
+  await new ModelSearch(page.context()).searchAndOpen(page, { modelNumber: 'S8J33A', isSolution: false });
+  expect(await page.evaluate(() => (window as unknown as { clickedCard?: string }).clickedCard)).toBe('cto');
+});

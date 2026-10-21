@@ -73,19 +73,11 @@ export class SolutionWizard {
       configurationText: undefined,
       quantity: memory.quantity,
     });
+    // Processor and Memory are mandatory and picked first (SimpliVity Wizards, 2026-10-21 recordings).
     const choices: WizardChoice[] = [
       { label: /^Processor$/i, preferred: instruction(/^processor$/i) },
       { label: /^Memory$/i, preferred: memory },
-      { label: /^Memory Qty$/i, aliases: /memory.*qty|memqty/i, preferred: memoryQuantity, allowedRandomText: /^(?:[1-8])$/ },
-      { label: /^Data Controller$/i, aliases: /datactrl|data.*controller/i },
-      { label: /^Storage Drives$/i, aliases: /storage.*drive|stodrive/i },
-      { label: /^Drive Qty$/i, aliases: /stoqty|drive.*qty/i },
-      { label: /^Controllers Accessories$/i, aliases: /controller.*accessor/i },
-      { label: /^Power Supply$/i, aliases: /power.*supply/i },
-      { label: /^(?:Select )?OCP Network Adapter$/i, aliases: /ocp.*(?:network)?.*adapter/i, occurrence: 0 },
-      { label: /^(?:Select )?OCP Network Adapter$/i, aliases: /ocp.*(?:network)?.*adapter/i, occurrence: 1, optional: true },
-      { label: /^Select Network Adapter$/i, aliases: /network.*adapter/i, occurrence: 0 },
-      { label: /^Select Network Adapter$/i, aliases: /network.*adapter/i, occurrence: 1, optional: true },
+      { label: /^Memory Qty$/i, aliases: /memory.*qty|memqty/i, preferred: memoryQuantity, allowedRandomText: /^(?:[1-8])$/, optional: true },
     ];
 
     const selected: SolutionWizardSelection[] = [];
@@ -93,6 +85,58 @@ export class SolutionWizard {
       const result = await this.selectChoice(choice);
       if (result) selected.push(result);
     }
+    // Then what the wizard still asks for: every dropdown left at "Please make a selection." (storage drives,
+    // network adapter, power supply, ...), and the minimum quantities its messages state.
+    selected.push(...await this.completeWizard(instructions));
+    return selected;
+  }
+
+  /**
+   * Fills the wizard's dropdowns still at "Please make a selection." and raises quantity dropdowns to a
+   * minimum the wizard's messages state ("Minimum 8 drives ..."). A pick can rebuild the wizard, so the
+   * fields are read again after each one. Excel rows whose Section is a dropdown's label are used for it.
+   */
+  private async completeWizard(instructions: ComponentInstruction[]): Promise<SolutionWizardSelection[]> {
+    const selected: SolutionWizardSelection[] = [];
+    const panel = this.page.locator('#extended_overview_solutionWizard').filter({ visible: true }).first();
+    const root = await panel.count() ? panel : this.page.locator('body');
+    const selects = root.locator('select');
+    const maxPicks = 20;
+    const skipped = new Set<number>();
+    for (let pick = 1; pick <= maxPicks; pick += 1) {
+      const messages = await wizardMessages(root);
+      if (pick === 1 && messages.length) console.log(`[INFO] Solution Wizard messages: ${messages.join(' || ')}`);
+      const fields = (await wizardFields(selects)).filter((item) => item.shown)
+        .map((field) => ({ ...field, minimum: field.numeric ? minimumFor(field.label, messages) : 0 }))
+        .filter((field) => !skipped.has(field.index) && (field.empty || field.minimum > Number(field.value)));
+      const field = fields[0];
+      if (!field) return selected;
+      let candidates = field.options.filter((option) => !option.disabled && option.value !== 'none_item' && option.text
+        && !/please make a selection|^none\.?$/i.test(option.text));
+      if (field.minimum) {
+        const enough = candidates.filter((option) => Number(option.text) >= field.minimum).sort((a, b) => Number(a.text) - Number(b.text));
+        if (enough.length) candidates = [enough[0]];
+      }
+      const name = field.label || `dropdown ${field.index + 1}`;
+      const requested = this.requestedValue(instructions.find((item) => field.label
+        && item.section.trim().toLowerCase() === field.label.toLowerCase()));
+      const picked = (requested ? candidates.find((option) => option.value.toLowerCase() === requested.toLowerCase()
+        || option.text.toLowerCase().includes(requested.toLowerCase())) : undefined)
+        ?? candidates[Math.floor(Math.random() * candidates.length)];
+      if (!picked) {
+        console.log(`[WARN] Solution Wizard ${name} has no selectable value; leaving it to OCA`);
+        skipped.add(field.index);
+        continue;
+      }
+      console.log(`[STEP] ${field.minimum ? `Minimum ${field.minimum} for` : requested ? 'Excel' : 'Random'} Solution Wizard ${name}: ${picked.text}`);
+      const select = selects.nth(field.index);
+      await select.evaluate((element) => (element.closest('.wizard_dropdown, .form-container-border') ?? element)
+        .scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }));
+      await select.selectOption(picked.value, { force: true });
+      await waitForBlockingOverlay(this.page);
+      selected.push({ label: field.label || `Dropdown ${field.index + 1}`, value: picked.value, text: picked.text });
+    }
+    console.log(`[WARN] Solution Wizard still asks for selections after ${maxPicks} picks; OCA's messages will be reported`);
     return selected;
   }
 
@@ -395,6 +439,75 @@ export class SolutionWizard {
       }
       if (matches.length > (choice.occurrence ?? 0)) return matches[choice.occurrence ?? 0];
     }
-    return undefined;
+    // The label may sit before the select's dropdown box rather than beside the select itself.
+    const byLabel = (await wizardFields(root.locator('select'))).filter((field) => choice.label.test(field.label));
+    const found = byLabel[choice.occurrence ?? 0];
+    return found ? root.locator('select').nth(found.index) : undefined;
   }
+}
+
+interface WizardField {
+  index: number;
+  label: string;
+  shown: boolean;
+  empty: boolean;
+  numeric: boolean;
+  value: string;
+  options: Array<{ value: string; text: string; disabled: boolean }>;
+}
+
+/** Every wizard select with its label (the nearest text before it), current value and options. */
+async function wizardFields(selects: Locator): Promise<WizardField[]> {
+  return selects.evaluateAll((nodes) => nodes.map((node, index) => {
+    const select = node as HTMLSelectElement;
+    const text = (element: Element) => (element.textContent ?? '').replace(/\s+/g, ' ').trim();
+    let label = '';
+    for (let element: Element | null = select; element && !label; element = element.parentElement) {
+      for (let sibling = element.previousElementSibling; sibling && !label; sibling = sibling.previousElementSibling) {
+        if (sibling.tagName !== 'SELECT' && text(sibling) && text(sibling).length <= 80) label = text(sibling);
+      }
+    }
+    // OCA hides the select under its selecter widget; the field is shown when its dropdown box is.
+    const field = (select.closest('.wizard_dropdown') ?? select.parentElement) as HTMLElement | null;
+    const options = Array.from(select.options).map((option) => ({ value: option.value, text: text(option), disabled: option.disabled }));
+    const current = select.selectedOptions[0] ? text(select.selectedOptions[0]) : '';
+    const values = options.filter((option) => !/please make a selection/i.test(option.text));
+    return {
+      index,
+      label: label.replace(/[*:]+$/, '').trim(),
+      shown: Boolean(field?.offsetParent) && !select.disabled,
+      empty: !current || /please make a selection/i.test(current),
+      numeric: values.length > 0 && values.every((option) => /^\d+$/.test(option.text)),
+      value: current,
+      options,
+    };
+  }));
+}
+
+/** Visible error and warning texts in the wizard. */
+async function wizardMessages(root: Locator): Promise<string[]> {
+  const texts = await root.locator('.error_message, .warning_message, [class*="error" i], [class*="alert" i]')
+    .evaluateAll((nodes) => nodes.filter((node) => (node as HTMLElement).offsetParent)
+      .map((node) => (node.textContent ?? '').replace(/\s+/g, ' ').trim())
+      .filter((text) => text && text.length <= 300));
+  return [...new Set(texts)];
+}
+
+/** Words of a label or message, plural "s" dropped, without the generic ones. */
+const meaningfulWords = (text: string) => text.toLowerCase().split(/[^a-z0-9]+/)
+  .filter((word) => word.length > 2 && !/^(?:qty|quantity|select|selected|must|the|and|min|max|minimum|maximum|per)$/.test(word))
+  .map((word) => word.replace(/s$/, ''));
+
+/**
+ * The minimum a wizard message states for a quantity dropdown: "Minimum 8 drives must be selected" for
+ * "Drive Qty". The message must share a word with the dropdown's label; 0 when none does.
+ */
+export function minimumFor(label: string, messages: string[]): number {
+  const words = new Set(meaningfulWords(label));
+  let minimum = 0;
+  for (const message of messages) {
+    const stated = Number(message.match(/\bmin(?:imum)?\s*(?:qty\s*)?(?:of\s*)?[:=]?\s*(\d+)/i)?.[1]);
+    if (stated && meaningfulWords(message).some((word) => words.has(word))) minimum = Math.max(minimum, stated);
+  }
+  return minimum;
 }

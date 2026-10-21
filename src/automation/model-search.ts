@@ -143,6 +143,13 @@ export class ModelSearch {
       .or(page.locator('button.dqe-customize-btn, .dqe-customize-btn'));
     const allCardContainers = container.locator('.dqe-card, div').filter({ visible: true });
 
+    // A model offered both ways ("S8J33A" — CTO and "simplivity380Gen12" — Wizard, SimpliVity 380 Gen12,
+    // 2026-10-21 recording) is built in its Wizard when its Model Type is a solution, not in the CTO card.
+    if (isSolution) {
+      const wizard = await this.findWizardCard(page, modelNumber);
+      if (wizard) return wizard;
+    }
+
     // Preserve the proven base-model lookup first. Older DQE pages use plain divs
     // rather than dqe-card, and their title can be "Pxxxxx — CTO".
     const exactCtoTitle = allCardContainers
@@ -189,6 +196,19 @@ export class ModelSearch {
     const wizards = configurableCards.filter({ hasText: /\bWizard\b/i });
     if (isSolution && await wizards.count() === 1) return wizards.first();
     return legacy;
+  }
+
+  /** A Wizard card for the model: one showing the model number, else one whose product dropdown carries it, else the only one. */
+  private async findWizardCard(page: Page, modelNumber: string): Promise<Locator | null> {
+    const action = page.getByRole('button', { name: /Customize|Build|Configure/i })
+      .or(page.locator('button.dqe-customize-btn, .dqe-customize-btn'));
+    const wizards = page.locator('#dqe_cards_container .dqe-card:not([data-type="st"])')
+      .filter({ visible: true, has: action, hasText: /\bWizard\b/i });
+    const named = wizards.filter({ hasText: new RegExp(`\\b${escapeRegex(modelNumber)}\\b`, 'i') }).first();
+    if (await named.isVisible().catch(() => false)) return named;
+    const byDisplayId = wizards.filter({ has: page.locator(`select.dqe-products option[data-displayid=${JSON.stringify(modelNumber)} i]`) }).first();
+    if (await byDisplayId.isVisible().catch(() => false)) return byDisplayId;
+    return await wizards.count() === 1 ? wizards.first() : null;
   }
 
   private async waitForConfigWorkspace(page: Page): Promise<void> {

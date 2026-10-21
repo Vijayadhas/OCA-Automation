@@ -20,8 +20,10 @@ export type ConfigurationSource = DetailedConfigurationSource | ReferenceConfigu
  *   Advanced Settings and the search result containing "Nutanix" is opened; the rest is the Server route.
  * - Arcus EMEA: the Arcus dHCI solution (HPE GreenLake for PC3000 with Alletra Storage MP (Block)) quoted in
  *   Saudi Arabia, searched by the word "Private" and built in its Wizard (recordings of 2026-10-20 and 21).
+ * - Simplivity Wizard: a SimpliVity model built in its Wizard card, not its CTO card ("S8J33A" — CTO beside
+ *   "simplivity380Gen12" — Wizard): Processor and Memory first, then what the wizard still asks for.
  */
-export const MODEL_TYPES = ['Server', 'Solution', 'Storage', 'Nutanix', 'Arcus EMEA'] as const;
+export const MODEL_TYPES = ['Server', 'Solution', 'Storage', 'Nutanix', 'Arcus EMEA', 'Simplivity Wizard'] as const;
 export type ModelType = (typeof MODEL_TYPES)[number];
 
 /** What a preset Model Type fills in when the Excel cell is blank. */
@@ -38,6 +40,7 @@ export const NUTANIX = 'Nutanix';
 
 export const MODEL_PRESETS: Partial<Record<ModelType, ModelPreset>> = {
   Nutanix: { route: 'Server', customerAccount: NUTANIX, description: NUTANIX },
+  'Simplivity Wizard': { route: 'Solution' },
   'Arcus EMEA': { route: 'Solution', description: 'HPE GreenLake for PC3000 with Alletra Storage MP (Block)', country: 'SAUDI ARABIA' },
 };
 
@@ -85,7 +88,7 @@ export interface OcaJob {
   integrationRackPartNumber?: string;
   server?: string;
   solutionName?: string;
-  /** Server, Solution, Storage, Nutanix or Arcus EMEA (Excel "Model Type"); blank = detected from the other columns and OCA. */
+  /** Server, Solution, Storage, Nutanix, Arcus EMEA or Simplivity Wizard (Excel "Model Type"); blank = detected from the other columns and OCA. */
   modelType?: string;
   /** Advanced Settings Customer Account (Excel "Customer Account"); blank = cleared, or Nutanix for Nutanix models. */
   customerAccount?: string;
