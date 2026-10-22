@@ -75,8 +75,8 @@ export function buildInputTemplate(): XLSX.WorkBook {
     model('JOB-015', 'S8J33A', 'Simplivity Wizard', 'SimpliVity 380 Gen12 in its Wizard. New; test.'),
     model('JOB-016', 'S2V31A', 'Simplivity Wizard', 'SimpliVity 325 Gen11 in its Wizard. New; test.'),
     // Alletra wizards, searched by a word as recorded (2026-10-22).
-    model('JOB-017', '4000', 'Alletra 4000', 'HPE Alletra Storage Servers in their wizard. New; test.'),
-    model('JOB-018', 'alletra', 'Alletra 5000', 'HPE Alletra 5000 array in the Alletra5000Sol Wizard. New; test.'),
+    model('JOB-017', '4000', 'Alletra 4000', 'HPE Alletra Storage Servers in their wizard. Passed (2026-10-22).'),
+    model('JOB-018', 'alletra', 'Alletra 5000', 'HPE Alletra 5000 array in the Alletra5000Sol Wizard. Passed (2026-10-22).'),
   ];
   // No component rows: every model gets random Processor, Memory, Smart Chassis and Power Supplies.
   const components: unknown[][] = [];
