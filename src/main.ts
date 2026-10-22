@@ -69,6 +69,7 @@ export async function run(argv = process.argv.slice(2)): Promise<number> {
     }
   };
   console.log(`[INFO] Code version: ${codeVersion()}`);
+  console.log(`[INFO] Page HTML: ${html.mode === 'steps' ? 'saved at every step' : 'saved only for failed models (Save page HTML at every step was off)'}`);
   // Attempts per model before it is reported as failed (OCA_MODEL_ATTEMPTS, formerly OCA_RULE_CONFLICT_ATTEMPTS).
   // Default 1 (project lead, 2026-10-15): a failed model is not retried automatically; the team retries
   // it by hand. Set OCA_MODEL_ATTEMPTS=3 to turn automatic retries back on.

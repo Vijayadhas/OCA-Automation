@@ -63,6 +63,9 @@ export function phraseWordCount(phrase: string): number {
   return phraseScore(phrase, phrase);
 }
 
+/** Liquid-cooled products, left out of random repairs while an air-cooled one is offered. */
+export const LIQUID_COOLING = /\b(?:liquid\s+cool\w*|DLC|cold\s+plate)\b/i;
+
 /** Candidates a repair tries before giving up (the model is then retried with fresh picks). */
 // Products OCA offers only at 0 are skipped in seconds, so a long list (24 network cards) can be tried further.
 const REPAIR_CANDIDATE_TRIES = 10;
@@ -767,11 +770,13 @@ export class ComponentEngine {
       // and "If 96GB or higher Memory is selected then High Performance Fan Kit must be selected" (P55432-B21, DL380
       // Gen11) sit on Processor or Memory and ask for a product of another choice. A rule naming a processor or memory
       // kind is left to repairRequiredKindRule.
+      // "If Standard Heat Sink is selected then Qty7 of Standard Fan Kit or Qty7 of Performance Fan Kit must be
+      // selected" (S8J34A, 2026-10-22) writes the count as "Qty7 of"; it was read as 1 and the rule stayed.
       const then = requires || requiredKind(rule.ownText) ? null
-        : rule.ownText.match(/\bthen\s+(?:(\d+)\s*Qty\s+of\s+)?(.+?)\s+must\s+be\s+selected\b/i);
-      const wanted = requires ?? then?.[2];
+        : rule.ownText.match(/\bthen\s+(?:(\d+)\s*Qty\s+of\s+|Qty\s*=?\s*(\d+)\s+of\s+)?(.+?)\s+must\s+be\s+selected\b/i);
+      const wanted = requires ?? then?.[3].replace(/\bQty\s*=?\s*\d+\s+of\s+/gi, '');
       if (!wanted) continue;
-      const count = Number(then?.[1] ?? 1) || 1;
+      const count = Number(then?.[1] ?? then?.[2] ?? 1) || 1;
       const targets = [...new Set([choice.id, ...rule.targets])];
       await this.openOwners(targets);
       const rows: Array<RowInfo & { choiceId: string; score: number; committed: number }> = [];
@@ -996,6 +1001,10 @@ export class ComponentEngine {
    * were tried one by one for over 8 minutes.
    */
   private async fillOne(label: string, candidates: Array<RowInfo & { choiceId: string }>, quantity = 1): Promise<void> {
+    // Liquid cooling needs racks and plumbing the order lacks: on S8J34A (2026-10-22) a random DLC Cold Plate
+    // Module brought "DLC support requires liquid cooling infrastructure" errors no repair could clear.
+    const air = candidates.filter((row) => !LIQUID_COOLING.test(row.description));
+    if (air.length) candidates = air;
     await this.tryRandomCandidates(label, candidates.map((row) => ({
       row: this.page.locator(`[id=${JSON.stringify(row.id)}]`), productNumber: row.productNumber, choiceId: row.choiceId,
     })), async (candidate) => {

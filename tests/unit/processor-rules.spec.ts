@@ -268,6 +268,39 @@ test('fills an empty choice whose own rule asks for minimum one product', async 
   await expect(page.locator('#item_tr_HEAT_cpuX_heat select')).toHaveValue('1');
 });
 
+// S8J34A (2026-10-22): a random DLC Cold Plate Module brought liquid cooling infrastructure errors.
+test('a flagged choice is filled with an air-cooled product, not a liquid-cooled one', async ({ page }) => {
+  await page.setContent(heatsinkSection(
+    [{ pid: 'CPU', description: 'AMD EPYC 9135 3.65GHz 16-core 200W Processor for HPE', quantity: 1, select: [0, 1] }],
+    [
+      { pid: 'DLC', description: 'HPE ProLiant Compute DL325 Gen12 Direct Liquid Cooling Cold Plate Module FIO Kit', select: [0, 1] },
+      { pid: 'CLOSED', description: 'HPE ProLiant Compute DL325 Gen12 Closed-loop Liquid Cooling Heat Sink Kit', select: [0, 1] },
+      { pid: 'STD', description: 'HPE ProLiant DL3X5 Gen11 1U CPU Standard Heat Sink Kit', select: [0, 1] },
+    ],
+    '', errorRule('Minimum one heatsink kit must be selected', [['cpuX_heat', 'Heatsink Kit']])));
+  await new ComponentEngine(page).satisfyRequiredSection('Processor');
+  await expect(page.locator('#item_tr_STD_cpuX_heat select')).toHaveValue('1');
+  await expect(page.locator('#item_tr_DLC_cpuX_heat select')).toHaveValue('0');
+  await expect(page.locator('#item_tr_CLOSED_cpuX_heat select')).toHaveValue('0');
+});
+
+// S8J34A (2026-10-22): "Qty7 of" was read as one fan kit, so the rule stayed and the heat sink was replaced.
+test('reads "then Qty7 of ... must be selected" as seven', async ({ page }) => {
+  const rule = errorRule('If Standard Heat Sink is selected then Qty7 of Standard Fan Kit or Qty7 of Performance Fan Kit must be selected. UNB Request exception',
+    [['fanX_fans', 'Power Cooling Options'], ['cpuX_heat', 'Heatsink Kit']]);
+  await page.setContent(heatsinkSection(
+    [{ pid: 'CPU', description: 'AMD EPYC 9135 3.65GHz 16-core 200W Processor for HPE', quantity: 1, select: [0, 1] }],
+    [{ pid: 'STD', description: 'HPE ProLiant DL3X5 Gen11 1U CPU Standard Heat Sink Kit', quantity: 1, select: [0, 1] }],
+    '', rule) + menuSection({ key: 'fanX', title: 'Power', collapsed: true, choices: [{ id: 'fanX_fans', title: 'Power Cooling Options', rows: [
+    { pid: 'STDFAN', description: 'HPE ProLiant DL3XX Gen12 1U Standard Fan Kit', select: [0, 1, 7] },
+    { pid: 'PERFFAN', description: 'HPE ProLiant DL3XX Gen12 1U Performance Fan Kit', select: [0, 1, 7] },
+  ] }] }));
+  await new ComponentEngine(page).satisfyRequiredSection('Processor');
+  const fans = [await page.locator('#item_tr_STDFAN_fanX_fans select').inputValue(), await page.locator('#item_tr_PERFFAN_fanX_fans select').inputValue()];
+  expect(fans.sort()).toEqual(['0', '7']);
+  await expect(page.locator('#item_tr_STD_cpuX_heat select')).toHaveValue('1');
+});
+
 // P53934-B21 (DL365 Gen11 EDSFF, 2026-10-19): OCA's own base held two Standard and one Performance heat sink against
 // two processors; the Standard one is "Supported with 8SFF CTO Model Only".
 test('removes the product OCA rules forbid most before matching processor and heat sink quantities', async ({ page }) => {
