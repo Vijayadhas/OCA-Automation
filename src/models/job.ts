@@ -22,8 +22,12 @@ export type ConfigurationSource = DetailedConfigurationSource | ReferenceConfigu
  *   Saudi Arabia, searched by the word "Private" and built in its Wizard (recordings of 2026-10-20 and 21).
  * - Simplivity Wizard: a SimpliVity model built in its Wizard card, not its CTO card ("S8J33A" — CTO beside
  *   "simplivity380Gen12" — Wizard): Processor and Memory first, then what the wizard still asks for.
+ * - Alletra 4000: HPE Alletra Storage Servers, searched by "4000" and built in their wizard: the base Alletra
+ *   Storage Server first, then Processor and Memory (recording of 2026-10-22).
+ * - Alletra 5000: HPE Alletra 5000 arrays, searched by "alletra" and built in the "Alletra5000Sol" — Wizard, tab by
+ *   tab (Array Selection, Base Array Components); the array has no Processor or Memory dropdown (2026-10-22).
  */
-export const MODEL_TYPES = ['Server', 'Solution', 'Storage', 'Nutanix', 'Arcus EMEA', 'Simplivity Wizard'] as const;
+export const MODEL_TYPES = ['Server', 'Solution', 'Storage', 'Nutanix', 'Arcus EMEA', 'Simplivity Wizard', 'Alletra 4000', 'Alletra 5000'] as const;
 export type ModelType = (typeof MODEL_TYPES)[number];
 
 /** What a preset Model Type fills in when the Excel cell is blank. */
@@ -42,6 +46,8 @@ export const MODEL_PRESETS: Partial<Record<ModelType, ModelPreset>> = {
   Nutanix: { route: 'Server', customerAccount: NUTANIX, description: NUTANIX },
   'Simplivity Wizard': { route: 'Solution' },
   'Arcus EMEA': { route: 'Solution', description: 'HPE GreenLake for PC3000 with Alletra Storage MP (Block)', country: 'SAUDI ARABIA' },
+  'Alletra 4000': { route: 'Solution', description: 'HPE Alletra Storage Servers' },
+  'Alletra 5000': { route: 'Solution', description: 'HPE Alletra 5000' },
 };
 
 const presetOf = (modelType: string | undefined): ModelPreset | undefined =>
@@ -88,7 +94,7 @@ export interface OcaJob {
   integrationRackPartNumber?: string;
   server?: string;
   solutionName?: string;
-  /** Server, Solution, Storage, Nutanix, Arcus EMEA or Simplivity Wizard (Excel "Model Type"); blank = detected from the other columns and OCA. */
+  /** Server, Solution, Storage, Nutanix, Arcus EMEA, Simplivity Wizard, Alletra 4000 or Alletra 5000 (Excel "Model Type"); blank = detected from the other columns and OCA. */
   modelType?: string;
   /** Advanced Settings Customer Account (Excel "Customer Account"); blank = cleared, or Nutanix for Nutanix models. */
   customerAccount?: string;

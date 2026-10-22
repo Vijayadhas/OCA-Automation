@@ -29,6 +29,10 @@ row in an Excel workbook it:
    - **Simplivity Wizard:** the model's Wizard card (not its CTO card); Processor, Memory, then every mandatory
      wizard dropdown (`requiredChoice`) still at "Please make a selection." and the minimum quantities the wizard's
      messages state. Optional dropdowns and product checkboxes are left alone.
+   - **Alletra 4000 / Alletra 5000:** search word (4000 / alletra) plus the preset description; the wizard opens with or
+     without a Solution Wizard tab and is completed tab by tab (`ul.wizard_tabs`): mandatory dropdowns before Processor
+     first (the base Alletra Storage Server), then Processor and Memory (a value the base model set is kept), then the
+     other mandatory dropdowns. A wizard without Processor/Memory (the Alletra 5000 array) passes.
    - **Solution / Arcus EMEA:** Solution Wizard (dHCI: solution type, server, server model, Server Qty within the
      wizard's Min/Max, adapter, switch), the solution Menu (Node Chassis, Node, Capacity, DAC Cables),
      then each server inside the solution from OCA's navigation tree, configured like a server.
@@ -43,7 +47,7 @@ row in an Excel workbook it:
 
 Inputs: the Excel template (`input/OCA-Input-Template.xlsx`, `npm run template:excel`, or the dashboard's
 "Download Excel template") has one row per model: Job ID, Model Number, Model Type (Server / Solution /
-Storage / Nutanix / Arcus EMEA / Simplivity Wizard), Model Description, Customer Account, Country, Service Type, Server, Integration Rack,
+Storage / Nutanix / Arcus EMEA / Simplivity Wizard / Alletra 4000 / Alletra 5000), Model Description, Customer Account, Country, Service Type, Server, Integration Rack,
 Solution Name, Generate End BOM, Enabled. Rows JOB-001 to JOB-012 are models already run; JOB-013 (Solution +
 Country) and JOB-014 (Arcus EMEA preset, search word "Private") are the Arcus solution still to verify.
 Preset Model Types live in `MODEL_PRESETS` (`src/models/job.ts`): each fills in its route, Customer Account,
@@ -158,6 +162,7 @@ Main code: `src/automation/component-engine.ts` (`ComponentEngine`),
 | 48 | Memory rules listing the only allowed quantities ("either 16 or 32 only", "quantities of 2/ 4/ 8/ 16 /24 /32 only") looped without a repair (S0V52A, P68217-B21) | `repairAllowedQuantitiesRule` raises the matching memory total to the next allowed quantity |
 | 49 | Arcus EMEA server (DL365 Gen11): "Turin Processor (9xx5) ... is only compatible with below V2 OS Boot Device only", no V2 boot device available | `limitedProcessorSeries`: swap to a processor outside the series |
 | 50 | SimpliVity models have a CTO card and a Wizard card; the user wants the Wizard; the wizard's fixed choice list did not fit every SimpliVity | `Model Type = Simplivity Wizard`; `findWizardCard`; `completeWizard` fills the dropdowns still empty and the minimum quantities the wizard states |
+| 52 | New wizard models Alletra 4000 (base server dropdown first, no Solution Wizard tab) and Alletra 5000 (tabs, no Processor) | Presets `Alletra 4000` / `Alletra 5000`; wizard root `.wizard_content`; tab by tab; base model before Processor |
 | 51 | Simplivity Wizard run: every wizard checkbox was ticked as an acknowledgement (optional rail kit, bezel lock, intrusion kit) and a hidden one (`include_encryption`) failed the run | Only "acknowledge" checkboxes are ticked, hidden ones skipped; only `requiredChoice` dropdowns are filled |
 
 ## 5. Manual QA workflow (from the team's training video, 2026-10-14)
@@ -221,6 +226,9 @@ End BOM Setup from two models; for Synergy, the configuration dropdown and a com
 - New model type to verify: **Simplivity Wizard** (JOB-015 S8J33A, JOB-016 S2V31A). First run (JOB-016, on `1d95649`)
   opened the Wizard card and failed on a hidden checkbox; fixed the same day (only acknowledgements ticked, only
   mandatory dropdowns filled), not yet re-run. The wizard's HTML is in that run's FAILED capture.
+- New model types to verify: **Alletra 4000** (JOB-017, search word 4000) and **Alletra 5000** (JOB-018, search word
+  alletra), from recordings only (2026-10-22). The 4000 wizard markup is captured; the 5000 wizard's is not. Not done
+  from the 5000 recording: the BOM "CLIC S2S (Production KB)" check and Services "Apply DMR to all".
 - Cannot be fixed in the automation (report to the user, not code):
   - No aaS search result: P61268-B21, the DL380a model, P42534-B21 (maybe a typo for P52534-B21).
   - Auto-generate End BOM disabled by OCA ("Use manual"): S2G16A, S2G18A, S6X65A, S3T65A, S3T66A,

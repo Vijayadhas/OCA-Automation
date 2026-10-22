@@ -55,16 +55,70 @@ export class SolutionWizard {
     console.log('[STEP] Opening Solution Wizard tab');
     const tab = this.page.locator('a[href="#extended_overview_solutionWizard"]')
       .or(this.page.getByRole('link', { name: /Solution Wizard/i })).filter({ visible: true }).first();
-    await expect(tab, 'Solution Wizard tab').toBeVisible({ timeout: 60_000 });
-    await this.scrollToSelection(tab, 'Solution Wizard tab');
-    await tab.click({ force: true });
-    await waitForBlockingOverlay(this.page);
+    // Some wizards open straight after Customize with no Solution Wizard tab (Alletra 4000 recording, 2026-10-22:
+    // the base server dropdown is picked at once); the wizard (#wizard_wrap.wizard_content) is then already shown.
+    const shownWizard = this.page.locator('.wizard_content').filter({ visible: true }).first();
+    let tabShown = false;
+    await expect.poll(async () => (tabShown = await tab.isVisible().catch(() => false)) || shownWizard.isVisible().catch(() => false), {
+      timeout: 60_000, message: 'Solution Wizard tab or wizard',
+    }).toBe(true);
+    if (tabShown) {
+      await this.scrollToSelection(tab, 'Solution Wizard tab');
+      await tab.click({ force: true });
+      await waitForBlockingOverlay(this.page);
+    } else {
+      console.log('[INFO] The wizard is shown without a Solution Wizard tab; configuring it');
+    }
     await this.acknowledgeRequirementsIfPresent();
 
     if (await this.page.locator('#dhci_type_options').count()) {
       return this.configureDhciSolution(server);
     }
 
+    // A wizard split into tabs (Alletra 5000: Array Selection, Base Array Components; Alletra 4000: Configure,
+    // Accessories) is completed tab by tab; a hidden tab's dropdowns cannot be filled.
+    const tabs = await this.wizardTabs();
+    if (!tabs.length) return this.configureWizardTab(instructions);
+    const selected: SolutionWizardSelection[] = [];
+    for (const [index, name] of tabs.entries()) {
+      const wizardTab = (await this.wizardRoot()).locator('.wizard_tabs a').filter({ visible: true, hasText: name }).first();
+      if (index > 0 || !await wizardTab.evaluate((link) => link.closest('li')?.classList.contains('ui-tabs-active') ?? false).catch(() => false)) {
+        console.log(`[STEP] Opening wizard tab ${name}`);
+        await wizardTab.click({ force: true });
+        await waitForBlockingOverlay(this.page);
+        await this.acknowledgeRequirementsIfPresent();
+      }
+      selected.push(...await this.configureWizardTab(instructions, selected));
+    }
+    return selected;
+  }
+
+  /** The visible titles of the wizard's own tabs (ul.wizard_tabs), in order. */
+  private async wizardTabs(): Promise<string[]> {
+    const links = (await this.wizardRoot()).locator('.wizard_tabs a').filter({ visible: true });
+    const names = (await links.allInnerTexts()).map(normalized).filter(Boolean);
+    if (names.length) console.log(`[INFO] Wizard tabs: ${names.join(', ')}`);
+    return [...new Set(names)];
+  }
+
+  /** The Solution Wizard panel, else a wizard shown without one (.wizard_content), else the page. */
+  private async wizardRoot(): Promise<Locator> {
+    const panel = this.page.locator('#extended_overview_solutionWizard').filter({ visible: true }).first();
+    if (await panel.count()) return panel;
+    const wizard = this.page.locator('.wizard_content').filter({ visible: true }).first();
+    return await wizard.count() ? wizard : this.page.locator('body');
+  }
+
+  /**
+   * Configures the wizard tab on screen. Mandatory dropdowns before Processor come first: a base model
+   * ("Select base Alletra Storage Server") decides the processors offered. Then Processor and Memory, and what
+   * the wizard still asks for. Earlier tabs' picks are passed in, so Processor and Memory are set once.
+   */
+  private async configureWizardTab(
+    instructions: ComponentInstruction[], earlier: SolutionWizardSelection[] = [],
+  ): Promise<SolutionWizardSelection[]> {
+    const selected = await this.completeWizard(instructions, /^Processor$/i);
+    const baseModelPicked = selected.length > 0;
     const instruction = (section: RegExp) => instructions.find((item) => section.test(item.section.trim()));
     const memory = instruction(/^memory$/i);
     const memoryQuantity = instruction(/^memory\s*(?:qty|quantity)$/i) ?? (memory?.quantity == null ? undefined : {
@@ -80,9 +134,16 @@ export class SolutionWizard {
       { label: /^Memory Qty$/i, aliases: /memory.*qty|memqty/i, preferred: memoryQuantity, allowedRandomText: /^(?:[1-8])$/, optional: true },
     ];
 
-    const selected: SolutionWizardSelection[] = [];
     for (const choice of choices) {
-      const result = await this.selectChoice(choice);
+      const label = choice.label.source.replace(/\^|\$/g, '');
+      if ([...earlier, ...selected].some((item) => item.label === label)) continue;
+      // A storage array wizard (Alletra 5000) has no Processor or Memory dropdown: they are part of its base model.
+      if (!await this.findSelect(choice)) {
+        if (!choice.optional) console.log(`[INFO] This wizard${earlier.length ? ' tab' : ''} has no ${label} dropdown; continuing`);
+        continue;
+      }
+      // A value the wizard set from the base model picked above is kept unless Excel names another.
+      const result = await this.selectChoice(choice, baseModelPicked);
       if (result) selected.push(result);
     }
     // Then what the wizard still asks for: every dropdown left at "Please make a selection." (storage drives,
@@ -95,18 +156,20 @@ export class SolutionWizard {
    * Fills the wizard's dropdowns still at "Please make a selection." and raises quantity dropdowns to a
    * minimum the wizard's messages state ("Minimum 8 drives ..."). A pick can rebuild the wizard, so the
    * fields are read again after each one. Excel rows whose Section is a dropdown's label are used for it.
+   * With `before`, only dropdowns placed before the first one labelled so are filled.
    */
-  private async completeWizard(instructions: ComponentInstruction[]): Promise<SolutionWizardSelection[]> {
+  private async completeWizard(instructions: ComponentInstruction[], before?: RegExp): Promise<SolutionWizardSelection[]> {
     const selected: SolutionWizardSelection[] = [];
-    const panel = this.page.locator('#extended_overview_solutionWizard').filter({ visible: true }).first();
-    const root = await panel.count() ? panel : this.page.locator('body');
+    const root = await this.wizardRoot();
     const selects = root.locator('select');
     const maxPicks = 20;
     const skipped = new Set<number>();
     for (let pick = 1; pick <= maxPicks; pick += 1) {
       const messages = await wizardMessages(root);
-      if (pick === 1 && messages.length) console.log(`[INFO] Solution Wizard messages: ${messages.join(' || ')}`);
-      const shown = (await wizardFields(selects)).filter((item) => item.shown);
+      if (pick === 1 && messages.length && !before) console.log(`[INFO] Solution Wizard messages: ${messages.join(' || ')}`);
+      const all = await wizardFields(selects);
+      const end = before ? all.find((item) => before.test(item.label))?.index ?? all.length : all.length;
+      const shown = all.filter((item) => item.shown && item.index < end);
       // OCA marks the wizard's mandatory dropdowns (class requiredChoice, red icon when missing); when it
       // does, only those are filled and the optional ones stay at "None.".
       const marked = shown.some((item) => item.required);
@@ -327,8 +390,7 @@ export class SolutionWizard {
   }
 
   private async acknowledgeRequirementsIfPresent(): Promise<void> {
-    const panel = this.page.locator('#extended_overview_solutionWizard').filter({ visible: true }).first();
-    const root = await panel.count() ? panel : this.page.locator('body');
+    const root = await this.wizardRoot();
     const disabled = root.locator('.wizard_checkbox input[type="checkbox"]:disabled');
     if (await disabled.count()) {
       const disabledIds = await disabled.evaluateAll((nodes) => nodes.map((node) => node.id || '<unnamed>').join(', '));
@@ -364,7 +426,7 @@ export class SolutionWizard {
     if (!acknowledged) console.log('[INFO] No Solution Wizard acknowledgement to tick; continuing');
   }
 
-  private async selectChoice(choice: WizardChoice): Promise<SolutionWizardSelection | undefined> {
+  private async selectChoice(choice: WizardChoice, keepCurrent = false): Promise<SolutionWizardSelection | undefined> {
     const select = await this.findSelect(choice);
     if (!select) {
       if (choice.optional) {
@@ -382,6 +444,16 @@ export class SolutionWizard {
     });
     await this.page.waitForTimeout(250);
 
+    const label = choice.label.source.replace(/\^|\$/g, '');
+    const requested = this.requestedValue(choice.preferred);
+    if (keepCurrent && !requested) {
+      const current = normalized(await select.locator('option:checked').textContent().catch(() => '') ?? '');
+      if (current && !/please make a selection|^none\.?$/i.test(current)) {
+        console.log(`[STEP] Keeping Solution Wizard ${label} set from the base model: ${current}`);
+        return { label, value: await select.inputValue(), text: current };
+      }
+    }
+
     await expect.poll(() => select.locator('option').count(), {
       timeout: 60_000,
       message: `Options for Solution Wizard choice ${choice.label}`,
@@ -395,7 +467,6 @@ export class SolutionWizard {
       && !/please make a selection|^none\.?$/i.test(option.text));
     if (choice.allowedRandomText) candidates = candidates.filter((option) => choice.allowedRandomText!.test(option.text));
 
-    const requested = this.requestedValue(choice.preferred);
     const picked = requested
       ? candidates.find((option) => option.value.toLowerCase() === requested.toLowerCase()
           || option.text.toLowerCase() === requested.toLowerCase()
@@ -415,7 +486,7 @@ export class SolutionWizard {
     if (!current || /please make a selection/i.test(current)) {
       throw new Error(`Solution Wizard choice ${choice.label} did not retain ${picked.text}`);
     }
-    return { label: choice.label.source.replace(/\^|\$/g, ''), value: picked.value, text: current };
+    return { label, value: picked.value, text: current };
   }
 
   private requestedValue(instruction?: ComponentInstruction): string | undefined {
@@ -426,8 +497,7 @@ export class SolutionWizard {
   }
 
   private async findSelect(choice: WizardChoice): Promise<Locator | undefined> {
-    const panel = this.page.locator('#extended_overview_solutionWizard').filter({ visible: true }).first();
-    const root = await panel.count() ? panel : this.page.locator('body');
+    const root = await this.wizardRoot();
     // Start at the label itself so nested wizard/form containers cannot return the
     // same select more than once when two adapter controls share an identical label.
     const labelled = root.locator('span').filter({ hasText: choice.label })

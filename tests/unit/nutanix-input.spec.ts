@@ -34,6 +34,11 @@ test('Arcus EMEA is a Solution preset with Saudi Arabia and the Arcus search res
   // SimpliVity models built in their Wizard card: the Solution route, no other preset values.
   expect(routeFromModelType(parseModelType('simplivity wizard'), { isSolution: false, isStorage: false })).toEqual({ modelType: 'Simplivity Wizard', isSolution: true, isStorage: false });
   expect([countryFor({ modelType: 'Simplivity Wizard' }), searchDescriptionFor({ modelType: 'Simplivity Wizard' })]).toEqual([undefined, undefined]);
+  // Alletra wizards (2026-10-22 recordings): searched by a word, opened from their search result.
+  expect(routeFromModelType(parseModelType('alletra-4000'), { isSolution: false, isStorage: true })).toEqual({ modelType: 'Alletra 4000', isSolution: true, isStorage: false });
+  expect(searchDescriptionFor({ modelType: 'Alletra 4000' })).toBe('HPE Alletra Storage Servers');
+  expect(searchDescriptionFor({ modelType: 'Alletra 5000' })).toBe('HPE Alletra 5000');
+  expect(countryFor({ modelType: 'Alletra 5000' })).toBeUndefined();
 });
 
 test('the input template has every dialog field and reads back as runnable jobs', () => {
@@ -44,12 +49,14 @@ test('the input template has every dialog field and reads back as runnable jobs'
   expect(XLSX.utils.sheet_to_json<string[]>(workbook.Sheets.Models, { header: 1 })[0]).toEqual([...TEMPLATE_MODEL_COLUMNS, 'Notes']);
 
   const jobs = new ExcelReader().read(file);
-  expect(jobs).toHaveLength(16);
-  expect(new Set(jobs.map((job) => job.jobId)).size).toBe(16);
+  expect(jobs).toHaveLength(18);
+  expect(new Set(jobs.map((job) => job.jobId)).size).toBe(18);
   const byId = (jobId: string) => jobs.find((job) => job.jobId === jobId)!;
   expect([byId('JOB-010').modelNumber, byId('JOB-010').modelType, byId('JOB-010').isSolution]).toEqual(['P72176-B21', 'Nutanix', false]);
   expect([byId('JOB-011').modelNumber, byId('JOB-011').isSolution]).toEqual(['S3V83A', true]);
   expect([byId('JOB-014').modelType, byId('JOB-014').isSolution, byId('JOB-014').country]).toEqual(['Arcus EMEA', true, undefined]);
+  expect([byId('JOB-017').modelNumber, byId('JOB-017').modelType, byId('JOB-017').isSolution]).toEqual(['4000', 'Alletra 4000', true]);
+  expect([byId('JOB-018').modelNumber, byId('JOB-018').modelType, byId('JOB-018').isSolution]).toEqual(['alletra', 'Alletra 5000', true]);
   // Notes are for the team; they never become a search description (only JOB-013 has one in its own column).
   expect(jobs.filter((job) => job.modelDescription !== undefined).map((job) => job.jobId)).toEqual(['JOB-013']);
   const sections = (index: number) => {

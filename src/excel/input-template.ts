@@ -22,7 +22,9 @@ const instructions: Array<[string, string, string]> = [
     + 'then the Server route. Arcus EMEA: the Arcus solution (HPE GreenLake for PC3000 with Alletra Storage MP (Block)) '
     + 'in SAUDI ARABIA, built in its Wizard; Model Number is the search word, e.g. Private. Simplivity Wizard: the '
     + 'Wizard card of the model is opened (not its CTO card); Processor and Memory are picked, then every wizard dropdown '
-    + 'still asking for a selection, at the minimum quantity its messages state. Blank: detected from OCA.'],
+    + 'still asking for a selection, at the minimum quantity its messages state. Alletra 4000 / Alletra 5000: the '
+    + '"HPE Alletra Storage Servers" / "HPE Alletra 5000" search result (Model Number is the search word, e.g. 4000 / '
+    + 'alletra), built in its wizard: the base model first, then each wizard tab\'s mandatory dropdowns. Blank: detected from OCA.'],
   ['Model Description', 'Optional', 'Text the OCA search result must contain, when the model has several results. '
     + 'Nutanix models use "Nutanix" when blank; Arcus EMEA uses the Arcus solution name.'],
   ['Customer Account', 'Optional', 'Advanced Settings Customer Account, exactly as OCA lists it. Blank: cleared '
@@ -72,6 +74,9 @@ export function buildInputTemplate(): XLSX.WorkBook {
     // SimpliVity models offered as a CTO card and a Wizard card, built in the Wizard (2026-10-21 recordings).
     model('JOB-015', 'S8J33A', 'Simplivity Wizard', 'SimpliVity 380 Gen12 in its Wizard. New; test.'),
     model('JOB-016', 'S2V31A', 'Simplivity Wizard', 'SimpliVity 325 Gen11 in its Wizard. New; test.'),
+    // Alletra wizards, searched by a word as recorded (2026-10-22).
+    model('JOB-017', '4000', 'Alletra 4000', 'HPE Alletra Storage Servers in their wizard. New; test.'),
+    model('JOB-018', 'alletra', 'Alletra 5000', 'HPE Alletra 5000 array in the Alletra5000Sol Wizard. New; test.'),
   ];
   // No component rows: every model gets random Processor, Memory, Smart Chassis and Power Supplies.
   const components: unknown[][] = [];
