@@ -62,8 +62,8 @@ template** button gives the same file. Its `Models` sheet has every field of the
 
 ### Page HTML at every step
 
-Failed models always save their page HTML. Tick **Save page HTML at every step** in the dashboard (or
-pass `--capture-html`) to also save the page after every step, under `output/html/<Job ID>/`.
+The page is saved after every step, under `output/html/<Job ID>/` (on by default: **Save page HTML at every
+step** in the dashboard). Untick it, or pass `--no-capture-html`, to save only failed models' pages.
 
 Set `Storage` to `Yes` for a standalone storage model. The storage flow selects available Cloud
 Connectivity, Controller Node Models, and Capacity choices from OCA and derives quantities from the
@@ -170,7 +170,7 @@ Optional flags:
 - `--job-id <id>` — run one job
 - `--retry-failed` — run only jobs previously recorded as Failed or Unsupported
 - `--trace` — retain Playwright traces for failed jobs
-- `--capture-html` — save page HTML after every step; failed jobs are always saved (see
+- `--no-capture-html` — save page HTML only for failed jobs; by default it is saved after every step (see
   `docs/DEVELOPMENT_WORKFLOW.md`)
 - `--headless` — available for future unattended environments; headed is the default
 

@@ -35,7 +35,8 @@ export function parseCliArgs(args: string[]): CliOptions {
     jobId: valueAfter(args, '--job-id'),
     retryFailed: args.includes('--retry-failed'),
     trace: args.includes('--trace'),
-    captureHtml: args.includes('--capture-html'),
+    // On by default: the step captures are what failures are diagnosed from. --capture-html is still accepted.
+    captureHtml: !args.includes('--no-capture-html'),
   };
 }
 
@@ -49,5 +50,6 @@ Options:
   --job-id <id>         Process one Job ID
   --retry-failed        Process only failed/unsupported prior results
   --trace               Capture Playwright traces for failed jobs
-  --capture-html        Save page HTML after every step (failed jobs are always saved)
+  --capture-html        Save page HTML after every step (default; failed jobs are always saved)
+  --no-capture-html     Save page HTML only for failed jobs
 `;

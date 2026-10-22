@@ -73,8 +73,8 @@ Repository: https://github.com/Vijayadhas/OCA-Automation (branch `main`).
   adds a change-log row → the user asks to commit and push, downloads the zip again and re-runs the
   failed models.
 - **Selectors only from captured HTML.** Never invent selectors or page structure; ask for HTML if
-  it is missing. Failure captures are written automatically. `--capture-html` (or the dashboard
-  checkbox) saves one after every step.
+  it is missing. Failure captures are written automatically, and since 2026-10-22 a capture
+  after every step is the default (dashboard checkbox ticked; `--no-capture-html` turns it off).
 - **Generic by design.** Nothing model-specific in `src`: no model numbers, part numbers, server
   families, or model-specific element ids. Find elements by visible titles and OCA's shared
   structure (section header → choice title → item rows). A section a model doesn't offer is skipped.
