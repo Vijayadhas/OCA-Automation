@@ -537,17 +537,18 @@ interface WizardField {
 async function wizardFields(selects: Locator): Promise<WizardField[]> {
   return selects.evaluateAll((nodes) => nodes.map((node, index) => {
     const select = node as HTMLSelectElement;
-    const text = (element: Element) => (element.textContent ?? '').replace(/\s+/g, ' ').trim();
+    // No named helper here: tsx would wrap it in __name(), which the page does not have.
     let label = '';
     for (let element: Element | null = select; element && !label; element = element.parentElement) {
       for (let sibling = element.previousElementSibling; sibling && !label; sibling = sibling.previousElementSibling) {
-        if (sibling.tagName !== 'SELECT' && text(sibling) && text(sibling).length <= 80) label = text(sibling);
+        const siblingText = (sibling.textContent ?? '').replace(/\s+/g, ' ').trim();
+        if (sibling.tagName !== 'SELECT' && siblingText && siblingText.length <= 80) label = siblingText;
       }
     }
     // OCA hides the select under its selecter widget; the field is shown when its dropdown box is.
     const field = (select.closest('.wizard_dropdown') ?? select.parentElement) as HTMLElement | null;
-    const options = Array.from(select.options).map((option) => ({ value: option.value, text: text(option), disabled: option.disabled }));
-    const current = select.selectedOptions[0] ? text(select.selectedOptions[0]) : '';
+    const options = Array.from(select.options).map((option) => ({ value: option.value, text: (option.textContent ?? '').replace(/\s+/g, ' ').trim(), disabled: option.disabled }));
+    const current = (select.selectedOptions[0]?.textContent ?? '').replace(/\s+/g, ' ').trim();
     const values = options.filter((option) => !/please make a selection/i.test(option.text));
     return {
       index,
