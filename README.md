@@ -65,9 +65,10 @@ template** button gives the same file. Its `Models` sheet has every field of the
 The page is saved after every step, under `output/html/<Job ID>/` (on by default: **Save page HTML at every
 step** in the dashboard). Untick it, or pass `--no-capture-html`, to save only failed models' pages.
 
-Set `Storage` to `Yes` for a standalone storage model. The storage flow selects available Cloud
-Connectivity, Controller Node Models, and Capacity choices from OCA and derives quantities from the
-controls exposed by the page. A row cannot have both `Solution` and `Storage` set to `Yes`.
+Set `Storage` to `Yes` (or Model Type `Storage`) for a standalone storage model. The storage flow turns off
+HPE Recommended only, then selects available Cloud Connectivity, Controller Node Models (Alletra MP) or Site
+Survey (HPE GreenLake for File, S1F24A), and Capacity choices from OCA, skipping sections the model does not
+offer, and derives quantities from the controls exposed by the page. A row cannot have both `Solution` and `Storage` set to `Yes`.
 
 Set `Solution` to `Yes` (case-insensitive) for a solution model. `Solutions` is also accepted for
 backward compatibility. Those rows are configured in the

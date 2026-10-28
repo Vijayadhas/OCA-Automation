@@ -47,3 +47,26 @@ test('accepts Cloud Connectivity as a row choice and uses exposed quantities for
   expect(selected[0]).toMatchObject({ label: 'Cloud Connectivity', quantity: 0 });
   await expect(page.locator('[data-elementid="cloudConnectivitySection_choice"]')).toHaveAttribute('data-selected', 'true');
 });
+
+// HPE GreenLake for File (S1F24A, "razercrestsol" CTO, 2026-10-28 recording): Cloud Connectivity, Site Survey and
+// Capacity; no Controller Node sections.
+test('a storage model without Controller Node sections gets Cloud Connectivity, Site Survey and Capacity', async ({ page }) => {
+  await page.setContent(`<style>.choices { display:none } .choices.open { display:table-row-group }</style>
+    <button id="section_header_cloudConnectivitySection" onclick="cloud.classList.add('open')">Cloud Connectivity</button>
+    <table><tbody id="cloud" class="choices"><tr class="item_tr" data-elementid="cloudConnectivitySection_choice">
+      <td class="item_desc">Cloud requirement</td><td class="item_qty"><div class="item_qty_div">0</div></td></tr></tbody></table>
+    <button id="section_header_siteSurveySection" onclick="survey.classList.add('open')">Site Survey</button>
+    <table><tbody id="survey" class="choices"><tr class="item_tr" data-elementid="siteSurveySection_siteSurveyChoice">
+      <td class="_pid">SURVEY</td><td class="item_desc">Site survey service</td>
+      <td><select><option>0</option><option>1</option></select></td></tr></tbody></table>
+    <button id="section_header_hardDriveSection" onclick="capacity.classList.add('open')">Capacity</button>
+    <table><tbody id="capacity" class="choices"><tr class="item_tr" data-elementid="hardDriveSection_choice">
+      <td class="_pid">R9H68A</td><td class="item_desc">HPE Alletra Storage MP 7.68TB NVMe SFF Self-encrypting SSD</td>
+      <td><select><option>0</option><option>8</option></select></td></tr></tbody></table>`);
+
+  const selected = await new StorageFlow(page).configure();
+
+  expect(selected.map((item) => item.label)).toEqual(['Cloud Connectivity', 'Site Survey', 'Capacity']);
+  expect(selected[1]).toMatchObject({ productNumber: 'SURVEY', quantity: 1 });
+  expect(selected[2]).toMatchObject({ productNumber: 'R9H68A', quantity: 8 });
+});

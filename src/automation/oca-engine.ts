@@ -107,6 +107,9 @@ export class OcaEngine {
     const useSolutionWizard = await this.shouldUseSolutionWizard(job);
     const useStorageFlow = job.isStorage && await this.shouldUseStorageFlow(job);
     if (useStorageFlow) {
+      // As recorded for S1F24A (2026-10-28): all products are shown before Capacity is picked.
+      this.currentStep = 'Show all component products';
+      await this.measure('Show all component products', () => this.components.showAllProducts());
       this.currentStep = 'Configure Storage model';
       const selections = await this.measure('Configure Storage model', () => new StorageFlow(this.activePage).configure());
       result.selectedComponents = selections.map((item) =>

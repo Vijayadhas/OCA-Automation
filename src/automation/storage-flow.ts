@@ -14,12 +14,17 @@ interface StorageChoice {
   rowKey: string;
   selection: 'row' | 'quantity';
   preferHighest?: boolean;
+  /** Offered by some storage models only; skipped when the Menu has no such section. */
+  optional?: boolean;
 }
 
+// Alletra MP storage has Controller Node Chassis and Controller Nodes; HPE GreenLake for File (S1F24A, "razercrestsol"
+// CTO, 2026-10-28 recording) has Site Survey instead (#section_header_siteSurveySection).
 const choices: StorageChoice[] = [
   { label: 'Cloud Connectivity', sectionKey: 'cloudConnectivitySection', rowKey: 'cloudConnectivity', selection: 'row' },
-  { label: 'Controller Node Chassis', sectionKey: 'nodechassisSection', rowKey: 'nodechassisSection_nodeschassisChoice', selection: 'quantity' },
-  { label: 'Controller Nodes', sectionKey: 'nodechassisSection', rowKey: 'nodechassisSection_nodesChoice', selection: 'quantity', preferHighest: true },
+  { label: 'Controller Node Chassis', sectionKey: 'nodechassisSection', rowKey: 'nodechassisSection_nodeschassisChoice', selection: 'quantity', optional: true },
+  { label: 'Controller Nodes', sectionKey: 'nodechassisSection', rowKey: 'nodechassisSection_nodesChoice', selection: 'quantity', preferHighest: true, optional: true },
+  { label: 'Site Survey', sectionKey: 'siteSurveySection', rowKey: 'siteSurveySection_', selection: 'quantity', optional: true },
   { label: 'Capacity', sectionKey: 'hardDriveSection', rowKey: 'hardDriveSection_', selection: 'quantity' },
 ];
 
@@ -28,8 +33,20 @@ export class StorageFlow {
 
   async configure(): Promise<StorageSelection[]> {
     const selected: StorageSelection[] = [];
-    for (const choice of choices) selected.push(await this.selectRandomRequiredChoice(choice));
+    for (const choice of choices) {
+      if (choice.optional && !await this.offers(choice)) {
+        console.log(`[SKIP] Storage ${choice.label} is not offered for this model`);
+        continue;
+      }
+      selected.push(await this.selectRandomRequiredChoice(choice));
+    }
     return selected;
+  }
+
+  /** True when the Menu has the choice's section. */
+  private async offers(choice: StorageChoice): Promise<boolean> {
+    return this.page.locator(`#section_header_${choice.sectionKey}, [id*="section_header" i][id*="${choice.sectionKey}" i]`)
+      .first().isVisible({ timeout: 3_000 }).catch(() => false);
   }
 
   private async selectRandomRequiredChoice(choice: StorageChoice): Promise<StorageSelection> {

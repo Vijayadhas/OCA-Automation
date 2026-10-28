@@ -40,10 +40,23 @@ test(`random Processor skips CPUs over ${MAX_RANDOM_PROCESSOR_WATTS}W and never 
   expect(picked.filter((pid) => pid === 'HOT-350' || pid === 'HEAT')).toEqual([]);
 });
 
-test('random Processor reports when every visible CPU is over the limit', async ({ page }) => {
-  await page.setContent(processorSection([{ pid: 'HOT-350', description: 'Intel Xeon 6767P 2.4GHz 64-core 350W Processor' }]));
-  await expect(new ComponentEngine(page).selectRandom('Processor'))
-    .rejects.toThrow(/No selectable Processor product in "Processor" \(visible rows: 1; over 270W: 1\)/);
+// P97048-B21 (DL585a Gen13, 2026-10-28): every processor is 400W-600W.
+test('random Processor takes the lowest power when every CPU is over the limit', async ({ page }) => {
+  await page.setContent(processorSection([
+    { pid: 'HOT-600', description: 'AMD EPYC 9965 2.25GHz 192-core 600W Processor for HPE' },
+    { pid: 'HOT-400', description: 'AMD EPYC 9455 3.15GHz 48-core 400W Processor for HPE' },
+    { pid: 'HOT-500', description: 'AMD EPYC 9655 2.6GHz 96-core 500W Processor for HPE' },
+  ]));
+  const originalSet = QuantityHandler.prototype.set;
+  const picked: string[] = [];
+  QuantityHandler.prototype.set = async (_row: Locator, productNumber: string, quantity: number) => {
+    picked.push(productNumber);
+    return quantity;
+  };
+  try {
+    for (let run = 0; run < 3; run += 1) await new ComponentEngine(page).selectRandom('Processor');
+  } finally { QuantityHandler.prototype.set = originalSet; }
+  expect(picked).toEqual(['HOT-400', 'HOT-400', 'HOT-400']);
 });
 
 test('an unresolved cross-section rule quotes OCA error messages, not warnings', async ({ page }) => {

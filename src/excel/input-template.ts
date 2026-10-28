@@ -17,7 +17,7 @@ const instructions: Array<[string, string, string]> = [
   ['Models sheet', '', 'One row per model. Only Job ID and Model Number are required.'],
   ['Job ID', 'Required, unique', 'Any text, e.g. JOB-001. No two rows may share it.'],
   ['Model Number', 'Required', 'Exact OCA model, e.g. P75399-B21, S3V83A.'],
-  ['Model Type', `${MODEL_TYPES.join(' / ')} or blank`, 'Server: Menu tab. Solution: Solution Wizard. Storage: storage flow. '
+  ['Model Type', `${MODEL_TYPES.join(' / ')} or blank`, 'Server: Menu tab. Solution: Solution Wizard. Storage: storage flow (Cloud Connectivity, Controller Nodes or Site Survey, Capacity; e.g. S1F24A). '
     + 'Nutanix: Customer Account set to Nutanix in Advanced Settings, the search result containing "Nutanix" is opened, '
     + 'then the Server route. Arcus EMEA: the Arcus solution (HPE GreenLake for PC3000 with Alletra Storage MP (Block)) '
     + 'in SAUDI ARABIA, built in its Wizard; Model Number is the search word, e.g. Private. Simplivity Wizard: the '
@@ -77,6 +77,9 @@ export function buildInputTemplate(): XLSX.WorkBook {
     // Alletra wizards, searched by a word as recorded (2026-10-22).
     model('JOB-017', '4000', 'Alletra 4000', 'HPE Alletra Storage Servers in their wizard. Passed (2026-10-22).'),
     model('JOB-018', 'alletra', 'Alletra 5000', 'HPE Alletra 5000 array in the Alletra5000Sol Wizard. Passed (2026-10-22).'),
+    // HPE GreenLake for File storage (2026-10-28 recording) and a server offering only 400W-600W processors (2026-10-28 run).
+    model('JOB-019', 'S1F24A', 'Storage', 'HPE GreenLake for File ("razercrestsol" CTO): Cloud Connectivity, Site Survey, Capacity. New; test.'),
+    model('JOB-020', 'P97048-B21', 'Server', 'DL585a Gen13: every processor over 270W; the lowest power is taken. Retest.'),
   ];
   // No component rows: every model gets random Processor, Memory, Smart Chassis and Power Supplies.
   const components: unknown[][] = [];

@@ -1053,15 +1053,22 @@ export class ComponentEngine {
     }
     const rows = await this.rowInfo(this.choiceRows(choice.id).filter({ visible: true }));
     const overLimit: string[] = [];
-    const available = rows.filter((row) => {
-      if (!row.id || !row.productNumber || row.unavailable || isMemoryBlankProduct(row.description)) return false;
-      if (policy.radioOnly ? !row.hasRadio : !(row.hasQuantity || row.hasRadio)) return false;
-      const watts = Number(row.description.match(/(\d+)\s*W\b/i)?.[1]);
+    const selectable = rows.filter((row) => row.id && row.productNumber && !row.unavailable && !isMemoryBlankProduct(row.description)
+      && (policy.radioOnly ? row.hasRadio : row.hasQuantity || row.hasRadio));
+    let available = selectable.filter((row) => {
+      const watts = processorWatts(row.description);
       if (policy.limitWatts && watts > MAX_RANDOM_PROCESSOR_WATTS) { overLimit.push(`${row.productNumber} ${watts}W`); return false; }
       return true;
     });
     if (overLimit.length) {
       console.log(`[INFO] Random ${section.title} skips ${overLimit.length} product(s) over ${MAX_RANDOM_PROCESSOR_WATTS}W: ${overLimit.join(', ')}`);
+    }
+    if (!available.length && overLimit.length) {
+      // P97048-B21 (DL585a Gen13, 2026-10-28) offers only 400W-600W processors: the lowest power is taken.
+      const lowest = Math.min(...selectable.map((row) => processorWatts(row.description)));
+      available = selectable.filter((row) => processorWatts(row.description) === lowest);
+      console.log(`[INFO] Every ${section.title} product is over ${MAX_RANDOM_PROCESSOR_WATTS}W; using the lowest power, ${lowest}W: `
+        + available.map((row) => row.productNumber).join(', '));
     }
     if (!available.length) {
       throw new UnsupportedComponentError(`No selectable ${section.title} product in "${choice.title || choice.id}"`
