@@ -1,0 +1,3 @@
+# GitHub's "Download ZIP" (git archive) replaces the $Format:...$ placeholder in VERSION with the
+# commit id and time, so a run from a zip download logs exactly which commit it used.
+VERSION export-subst

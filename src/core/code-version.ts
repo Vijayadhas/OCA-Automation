@@ -5,11 +5,24 @@ import path from 'node:path';
 const projectRoot = path.resolve(__dirname, '../..');
 
 /**
- * Which code a run used, logged at start so a pasted log can be matched to a commit. Uses Git when
- * the project is a clone; a GitHub zip download has no .git, so it then reports the newest source
- * file's modified time (zip downloads keep the commit time on every file).
+ * The commit stamped into VERSION by GitHub's "Download ZIP" (`export-subst` in .gitattributes), as
+ * `<hash> <YYYY-MM-DD HH:MM>`; null in a clone, where the file still holds the `$Format:` placeholder.
+ */
+export function zipVersion(root = projectRoot): string | null {
+  let text: string;
+  try { text = fs.readFileSync(path.join(root, 'VERSION'), 'utf8').trim(); } catch { return null; }
+  const match = /^([0-9a-f]{7,40}) (\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})/.exec(text);
+  return match ? `${match[1]} ${match[2]} ${match[3]}` : null;
+}
+
+/**
+ * Which code a run used, logged at start so a pasted log can be matched to a commit. A GitHub zip
+ * download has no .git but carries the commit in VERSION; a clone uses Git. Without either, it
+ * reports the newest source file's modified time (zip downloads keep the commit time on every file).
  */
 export function codeVersion(root = projectRoot): string {
+  const fromZip = zipVersion(root);
+  if (fromZip) return `commit ${fromZip} (GitHub zip)`;
   try {
     const commit = execFileSync('git', ['log', '-1', '--format=%h %cd', '--date=format:%Y-%m-%d %H:%M'], {
       cwd: root, stdio: ['ignore', 'pipe', 'ignore'], timeout: 5_000,

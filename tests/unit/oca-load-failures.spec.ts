@@ -1,5 +1,6 @@
 import { test, expect, type BrowserContext } from '@playwright/test';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import * as XLSX from 'xlsx';
 import { run } from '../../src/main';
@@ -8,7 +9,7 @@ import { OcaEngine } from '../../src/automation/oca-engine';
 import { ComponentEngine } from '../../src/automation/component-engine';
 import { OcaPageLoadError } from '../../src/automation/configuration-errors';
 import { ocaProblemMessage, firstErrorLine } from '../../src/core/oca-problem';
-import { codeVersion } from '../../src/core/code-version';
+import { codeVersion, zipVersion } from '../../src/core/code-version';
 import { ExcelWriter } from '../../src/excel/excel-writer';
 import { createPendingResult } from '../../src/models/automation-result';
 import { menuSection } from './oca-menu-fixture';
@@ -76,5 +77,22 @@ test('opens OCA again when it fails to load, when automatic retries are on', asy
 });
 
 test('reports which code a run used', () => {
-  expect(codeVersion()).toMatch(/^(commit [0-9a-f]{7,} \d{4}-\d{2}-\d{2} \d{2}:\d{2}|no Git; newest source file .+ modified \d{4}-\d{2}-\d{2} \d{2}:\d{2})$/);
+  expect(codeVersion()).toMatch(/^(commit [0-9a-f]{7,} \d{4}-\d{2}-\d{2} \d{2}:\d{2}( \(GitHub zip\))?|no Git; newest source file .+ modified \d{4}-\d{2}-\d{2} \d{2}:\d{2})$/);
+});
+
+test('reads the commit GitHub stamps into VERSION in a zip download', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'oca-version-'));
+  try {
+    fs.mkdirSync(path.join(root, 'src'));
+    fs.writeFileSync(path.join(root, 'src', 'main.ts'), '');
+    fs.writeFileSync(path.join(root, 'VERSION'), 'c68b71d 2026-10-28 20:37:01 +0530\n');
+    expect(zipVersion(root)).toBe('c68b71d 2026-10-28 20:37');
+    expect(codeVersion(root)).toBe('commit c68b71d 2026-10-28 20:37 (GitHub zip)');
+    // In a clone the placeholder is not filled in, so VERSION is ignored.
+    fs.writeFileSync(path.join(root, 'VERSION'), '$Format:%h %ci$\n');
+    expect(zipVersion(root)).toBeNull();
+    expect(codeVersion(root)).not.toContain('GitHub zip');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
