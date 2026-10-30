@@ -4,13 +4,16 @@ import path from 'node:path';
 
 const projectRoot = path.resolve(__dirname, '../..');
 
+function readVersionFile(root: string): string {
+  try { return fs.readFileSync(path.join(root, 'VERSION'), 'utf8').trim(); } catch { return ''; }
+}
+
 /**
  * The commit stamped into VERSION by GitHub's "Download ZIP" (`export-subst` in .gitattributes), as
  * `<hash> <YYYY-MM-DD HH:MM>`; null in a clone, where the file still holds the `$Format:` placeholder.
  */
 export function zipVersion(root = projectRoot): string | null {
-  let text: string;
-  try { text = fs.readFileSync(path.join(root, 'VERSION'), 'utf8').trim(); } catch { return null; }
+  const text = readVersionFile(root);
   const match = /^([0-9a-f]{7,40}) (\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})/.exec(text);
   return match ? `${match[1]} ${match[2]} ${match[3]}` : null;
 }
@@ -22,7 +25,8 @@ export function zipVersion(root = projectRoot): string | null {
  */
 export function codeVersion(root = projectRoot): string {
   const fromZip = zipVersion(root);
-  if (fromZip) return `commit ${fromZip} (GitHub zip)`;
+  // The Windows package build writes "<hash> <date> package" into VERSION.
+  if (fromZip) return `commit ${fromZip} (${/\bpackage\b/.test(readVersionFile(root)) ? 'Windows package' : 'GitHub zip'})`;
   try {
     const commit = execFileSync('git', ['log', '-1', '--format=%h %cd', '--date=format:%Y-%m-%d %H:%M'], {
       cwd: root, stdio: ['ignore', 'pipe', 'ignore'], timeout: 5_000,

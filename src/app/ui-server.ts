@@ -35,7 +35,13 @@ type RunState = {
 const app = express();
 const port = Number(process.env.OCA_UI_PORT ?? 4173);
 const root = path.resolve(__dirname, '../..');
-const dataRoot = path.join(root, '.oca-ui', 'runs');
+// The installed Windows package keeps each user's runs outside the app folder (OCA_DATA_DIR), so an
+// update that replaces the app does not remove them. A source checkout keeps them in .oca-ui.
+const dataRoot = path.join(process.env.OCA_DATA_DIR ? path.resolve(process.env.OCA_DATA_DIR) : path.join(root, '.oca-ui'), 'runs');
+// Compiled to JavaScript (the Windows package runs dist/app/ui-server.js), the runner is dist/main.js
+// and needs no TypeScript loader; from source it is src/main.ts through tsx.
+const compiled = path.extname(__filename) === '.js';
+const runnerArgs = compiled ? [path.join(__dirname, '..', 'main.js')] : ['--import', 'tsx', path.join(root, 'src', 'main.ts')];
 const publicRoot = path.join(root, 'src', 'ui', 'public');
 const runs = new Map<string, RunState>();
 /** Local time of day, HH:MM:SS, put in front of each Activity log line. */
@@ -107,9 +113,9 @@ app.post('/api/runs', (req, res) => {
   fs.mkdirSync(outputDir, { recursive: true });
   writeRunWorkbook(jobs, inputPath);
   const settings = req.body.settings ?? {};
-  // Run Node directly with the tsx loader. Windows Node refuses to spawn npm.cmd
+  // Run Node directly (with the tsx loader from source). Windows Node refuses to spawn npm.cmd
   // without a shell (EINVAL), and a single process can receive the IPC stop request.
-  const args = ['--import', 'tsx', path.join(root, 'src', 'main.ts'), '--input', inputPath, '--output', outputDir,
+  const args = [...runnerArgs, '--input', inputPath, '--output', outputDir,
     settings.headless ? '--headless' : '--headed'];
   if (settings.trace) args.push('--trace');
   if (settings.captureHtml === false) args.push('--no-capture-html');
@@ -237,7 +243,7 @@ app.get('/api/runs/:id/download', (req, res) => {
  * Everything needed to look into a run, in one zip that opens into one folder: the Activity log
  * (activity.log, with the code version line), the input workbook, the results workbook, the HTML
  * captures (output/html/<Job ID>/) and any traces. Works for earlier runs too, as long as their
- * folder under .oca-ui/runs is still there (id "latest" takes the newest).
+ * folder under .oca-ui/runs (or OCA_DATA_DIR/runs) is still there (id "latest" takes the newest).
  */
 app.get('/api/runs/:id/share', (req, res) => {
   // "latest": the newest run folder, for a dashboard page reloaded after its run.

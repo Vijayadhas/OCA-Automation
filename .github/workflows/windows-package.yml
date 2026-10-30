@@ -1,0 +1,169 @@
+# Builds the Windows package (Setup.cmd + OCA.exe + bundled Node.js) on every push, checks it by
+# installing it and starting a run through the installed OCA.exe, and publishes it as a release:
+#   main               -> release "OCA Automation for Windows" (tag windows-package); the download link
+#                         https://github.com/Vijayadhas/OCA-Automation/releases/latest/download/OCA-Automation-Windows.zip
+#                         always gives the newest build
+#   feature/* branches -> pre-release "preview-<branch>", for testing before the branch is merged
+name: Windows package
+
+on:
+  push:
+    branches: [main, 'feature/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-package-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PACKAGE_NAME: OCA-Automation-Windows
+
+jobs:
+  test:
+    name: Typecheck and unit tests
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npx playwright install chromium
+      - run: npm run test:unit
+
+  package:
+    name: Build and smoke-test the package
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+      - name: Stage the package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = Join-Path $env:RUNNER_TEMP 'OCA-Automation'
+          $app = Join-Path $stage 'app'
+          New-Item -ItemType Directory -Force -Path $app, (Join-Path $app 'src\ui'), (Join-Path $app 'node'), (Join-Path $stage 'installer') | Out-Null
+
+          Copy-Item dist -Destination $app -Recurse
+          Copy-Item src\ui\public -Destination (Join-Path $app 'src\ui\public') -Recurse
+          Copy-Item package.json, package-lock.json -Destination $app
+          $stamp = '{0} {1} package' -f (git rev-parse --short HEAD), (git log -1 --format=%ci)
+          Set-Content -LiteralPath (Join-Path $app 'VERSION') -Value $stamp -Encoding ascii
+          Write-Host "Version: $stamp"
+
+          Push-Location $app
+          npm ci --omit=dev --no-audit --no-fund
+          if ($LASTEXITCODE) { throw "npm ci --omit=dev failed ($LASTEXITCODE)" }
+          Pop-Location
+
+          Copy-Item (Get-Command node).Source -Destination (Join-Path $app 'node\node.exe')
+          $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+          & $csc /nologo /target:exe /optimize+ "/out:$(Join-Path $app 'OCA.exe')" installer\launcher\OCA.cs
+          if ($LASTEXITCODE) { throw "Compiling OCA.exe failed ($LASTEXITCODE)" }
+
+          Copy-Item installer\Uninstall.cmd -Destination $app
+          Copy-Item installer\Setup.cmd, installer\Check-System.cmd, installer\README.txt -Destination $stage
+          Copy-Item installer\Setup.ps1 -Destination (Join-Path $stage 'installer')
+
+          $zip = Join-Path $env:RUNNER_TEMP "$env:PACKAGE_NAME.zip"
+          Compress-Archive -Path $stage -DestinationPath $zip -CompressionLevel Optimal
+          '{0:N1} MB' -f ((Get-Item $zip).Length / 1MB)
+          "STAGE=$stage" >> $env:GITHUB_ENV
+          "ZIP=$zip" >> $env:GITHUB_ENV
+
+      - name: Run the system check and install (Windows PowerShell 5.1)
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:STAGE\installer\Setup.ps1" -Quiet
+          $code = $LASTEXITCODE
+          Get-Content "$env:STAGE\system-check.txt"
+          if ($code -ne 0) { throw "Setup failed with exit code $code" }
+          $installed = Join-Path $env:LOCALAPPDATA 'Programs\OCA-Automation\OCA.exe'
+          if (-not (Test-Path $installed)) { throw "OCA.exe was not installed" }
+          & $installed --version
+
+      - name: Start the installed OCA.exe and run one model
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\OCA-Automation\OCA.exe'
+          $launcher = Start-Process -FilePath $exe -ArgumentList '--no-browser' -PassThru
+          $url = 'http://localhost:4173'
+          $ready = $false
+          for ($i = 0; $i -lt 60; $i++) {
+            try { if ((Invoke-WebRequest $url -UseBasicParsing -TimeoutSec 2).Content -match 'OCA Control Center') { $ready = $true; break } } catch { }
+            Start-Sleep -Seconds 1
+          }
+          if (-not $ready) { throw 'The dashboard did not start' }
+          $template = Invoke-WebRequest "$url/api/template" -UseBasicParsing
+          Write-Host ("Template download: HTTP {0}, {1} bytes" -f $template.StatusCode, $template.RawContentLength)
+
+          # The OCA site is not reachable from GitHub, so the model fails at "Open OCA"; what is checked is
+          # that the packaged runner starts, launches the browser, logs its version and writes a result.
+          $job = @{ jobId = 'SMOKE-1'; modelNumber = 'P97048-B21'; modelType = 'Server'; isSolution = $false; isStorage = $false
+                    quotationMode = 'aaS'; serviceType = 'Random'; generateEndBom = $false; enabled = $true
+                    source = @{ kind = 'detailed-excel'; instructions = @() }; inputRow = 2 }
+          $body = @{ jobs = @($job); settings = @{ headless = $true; trace = $false; captureHtml = $true } } | ConvertTo-Json -Depth 6
+          $run = Invoke-RestMethod "$url/api/runs" -Method Post -ContentType 'application/json' -Body $body
+          $state = $null
+          for ($i = 0; $i -lt 300; $i++) {
+            $state = Invoke-RestMethod "$url/api/runs/$($run.id)"
+            if ($state.status -in @('completed', 'failed', 'cancelled')) { break }
+            Start-Sleep -Seconds 1
+          }
+          $log = Invoke-RestMethod "$url/api/runs/$($run.id)/log"
+          Write-Host '----- activity.log -----'
+          Write-Host $log
+          Write-Host '------------------------'
+          Write-Host "Run status: $($state.status) - $($state.message)"
+          $expected = @('Code version: commit .+ \(Windows package\)', 'Browser: Microsoft Edge', '\[1/1\] P97048-B21 - (Success|Failed|Unsupported)', 'Results written to')
+          foreach ($pattern in $expected) { if ($log -notmatch $pattern) { throw "Activity log is missing: $pattern" } }
+          $share = Invoke-WebRequest "$url/api/runs/$($run.id)/share" -UseBasicParsing
+          Write-Host ("Share zip: {0} bytes" -f $share.RawContentLength)
+          Stop-Process -Id $launcher.Id -Force -ErrorAction SilentlyContinue
+          Get-Process node -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PACKAGE_NAME }}
+          path: ${{ env.ZIP }}
+          retention-days: 14
+
+  publish:
+    name: Publish the release
+    needs: [test, package]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.PACKAGE_NAME }}
+      - name: Replace the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          short=$(echo "$GITHUB_SHA" | cut -c1-7)
+          if [ "$BRANCH" = "main" ]; then
+            tag=windows-package; title="OCA Automation for Windows"; flags=""
+          else
+            tag="preview-$(echo "$BRANCH" | tr '/' '-')"; title="Preview: $BRANCH"; flags="--prerelease"
+          fi
+          notes="Build of ${short} on ${BRANCH}. Download ${PACKAGE_NAME}.zip, extract it, and run Setup.cmd. See README.txt inside."
+          gh release delete "$tag" --cleanup-tag --yes || true
+          gh release create "$tag" "${PACKAGE_NAME}.zip" --target "$GITHUB_SHA" --title "$title" --notes "$notes" $flags

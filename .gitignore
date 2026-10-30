@@ -10,3 +10,4 @@ playwright-report/
 output/
 captures/
 *logs*.txt
+dist/

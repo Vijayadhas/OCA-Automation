@@ -1,3 +1,6 @@
 # GitHub's "Download ZIP" (git archive) replaces the $Format:...$ placeholder in VERSION with the
 # commit id and time, so a run from a zip download logs exactly which commit it used.
 VERSION export-subst
+
+# Batch files need Windows line endings (cmd.exe misreads labels in LF files).
+*.cmd text eol=crlf

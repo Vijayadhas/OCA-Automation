@@ -88,6 +88,9 @@ test('reads the commit GitHub stamps into VERSION in a zip download', () => {
     fs.writeFileSync(path.join(root, 'VERSION'), 'c68b71d 2026-10-28 20:37:01 +0530\n');
     expect(zipVersion(root)).toBe('c68b71d 2026-10-28 20:37');
     expect(codeVersion(root)).toBe('commit c68b71d 2026-10-28 20:37 (GitHub zip)');
+    // The Windows package build marks its VERSION.
+    fs.writeFileSync(path.join(root, 'VERSION'), 'c68b71d 2026-10-28 20:37:01 +0530 package\n');
+    expect(codeVersion(root)).toBe('commit c68b71d 2026-10-28 20:37 (Windows package)');
     // In a clone the placeholder is not filled in, so VERSION is ignored.
     fs.writeFileSync(path.join(root, 'VERSION'), '$Format:%h %ci$\n');
     expect(zipVersion(root)).toBeNull();
