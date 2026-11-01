@@ -38,6 +38,20 @@ export function isMissingBrowserError(error: unknown): boolean {
 }
 
 /**
+ * Command-line switches for the browser. Installed Edge and Chrome show a yellow "You're using an
+ * unsupported command-line flag: --no-sandbox" bar (Playwright always passes --no-sandbox, and the
+ * switches below are flagged too); --test-type is the switch automation tools use to hide that bar.
+ * Playwright Chromium never shows it.
+ */
+export function browserArgs(channel: BrowserChannel): string[] {
+  return [
+    '--ignore-certificate-errors', '--allow-running-insecure-content', '--disable-web-security',
+    '--disable-notifications', '--no-first-run', '--no-default-browser-check',
+    ...(channel === 'chromium' ? [] : ['--test-type']),
+  ];
+}
+
+/**
  * Each browser keeps its own sign-in profile: a profile written by one browser is not safe to open
  * in another. Playwright Chromium keeps the folder given (so existing sign-ins carry on); Edge and
  * Chrome use a sibling folder named after the browser.

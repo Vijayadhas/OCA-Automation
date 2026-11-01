@@ -1,5 +1,14 @@
 import { test, expect } from '@playwright/test';
-import { browserOrder, isMissingBrowserError, profileFor } from '../../src/automation/browser-choice';
+import { browserArgs, browserOrder, isMissingBrowserError, profileFor } from '../../src/automation/browser-choice';
+
+test('installed Edge and Chrome hide the unsupported command-line flag bar', () => {
+  expect(browserArgs('msedge')).toContain('--test-type');
+  expect(browserArgs('chrome')).toContain('--test-type');
+  expect(browserArgs('chromium')).not.toContain('--test-type');
+  for (const channel of ['msedge', 'chrome', 'chromium'] as const) {
+    expect(browserArgs(channel)).toEqual(expect.arrayContaining(['--ignore-certificate-errors', '--disable-web-security']));
+  }
+});
 
 test('tries Edge, then Chrome, then Playwright Chromium by default', () => {
   expect(browserOrder(undefined)).toEqual(['msedge', 'chrome', 'chromium']);

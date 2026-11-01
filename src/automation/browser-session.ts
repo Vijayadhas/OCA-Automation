@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { chromium, type BrowserContext, type Page } from '@playwright/test';
 import { installOcaShim } from '../core/shim';
-import { BROWSER_NAMES, browserOrder, isMissingBrowserError, profileFor, type BrowserChannel } from './browser-choice';
+import { BROWSER_NAMES, browserArgs, browserOrder, isMissingBrowserError, profileFor, type BrowserChannel } from './browser-choice';
 
 export interface BrowserSessionOptions {
   profilePath: string;
@@ -38,10 +38,7 @@ export class BrowserSession {
       headless: !this.options.headed,
       viewport: { width: 1920, height: 1080 },
       ignoreHTTPSErrors: true,
-      args: [
-        '--ignore-certificate-errors', '--allow-running-insecure-content', '--disable-web-security',
-        '--disable-notifications', '--no-first-run', '--no-default-browser-check',
-      ],
+      args: browserArgs(channel),
     });
   }
 
