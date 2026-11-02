@@ -35,7 +35,8 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npx playwright install chromium
-      - run: npm run test:unit
+      # The github reporter turns each failure into an annotation, readable without the full log.
+      - run: npm run test:unit -- --reporter=list,github
 
   package:
     name: Build and smoke-test the package
