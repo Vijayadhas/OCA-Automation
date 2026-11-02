@@ -10,10 +10,10 @@ test('installed Edge and Chrome hide the unsupported command-line flag bar', () 
   }
 });
 
-test('tries Edge, then Chrome, then Playwright Chromium by default', () => {
-  expect(browserOrder(undefined)).toEqual(['msedge', 'chrome', 'chromium']);
-  expect(browserOrder('')).toEqual(['msedge', 'chrome', 'chromium']);
-  expect(browserOrder(' Auto ')).toEqual(['msedge', 'chrome', 'chromium']);
+test('tries Chrome, then Edge, then Playwright Chromium by default', () => {
+  expect(browserOrder(undefined)).toEqual(['chrome', 'msedge', 'chromium']);
+  expect(browserOrder('')).toEqual(['chrome', 'msedge', 'chromium']);
+  expect(browserOrder(' Auto ')).toEqual(['chrome', 'msedge', 'chromium']);
 });
 
 test('OCA_BROWSER picks one browser', () => {
@@ -21,7 +21,7 @@ test('OCA_BROWSER picks one browser', () => {
   expect(browserOrder('MSEDGE')).toEqual(['msedge']);
   expect(browserOrder('chrome')).toEqual(['chrome']);
   expect(browserOrder('chromium')).toEqual(['chromium']);
-  expect(() => browserOrder('firefox')).toThrow(/auto, edge, chrome or chromium/);
+  expect(() => browserOrder('firefox')).toThrow(/auto, chrome, edge or chromium/);
 });
 
 test('only a browser that is not installed moves on to the next one', () => {

@@ -35,7 +35,7 @@ static class Launcher
         "# How long to wait for you to sign in to OCA, in milliseconds.",
         "OCA_AUTH_WAIT_MS=120000",
         "",
-        "# Browser: auto (Microsoft Edge, then Google Chrome), edge, chrome or chromium.",
+        "# Browser: auto (Google Chrome, then Microsoft Edge), chrome, edge or chromium.",
         "# OCA_BROWSER=auto",
         "",
         "# OCA login page.",
@@ -123,7 +123,9 @@ static class Launcher
         if (IsDashboard(url))
         {
             Console.WriteLine("OCA Automation is already running: " + url);
+            Console.WriteLine("Changes to settings.txt apply after you close the OCA Automation window and start it again.");
             if (openBrowser) Process.Start(url);
+            if (openBrowser && !Console.IsInputRedirected) Thread.Sleep(5000);
             return 0;
         }
 

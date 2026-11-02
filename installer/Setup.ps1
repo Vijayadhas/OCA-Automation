@@ -189,18 +189,21 @@ function Invoke-SystemCheck {
         $edge = Find-Browser 'Microsoft\Edge' 'msedge.exe'
         $chrome = Find-Browser 'Google\Chrome' 'chrome.exe'
         $found = @()
-        if ($edge) { $found += ('Microsoft Edge {0}' -f (Get-Item -LiteralPath $edge).VersionInfo.ProductVersion) }
         if ($chrome) { $found += ('Google Chrome {0}' -f (Get-Item -LiteralPath $chrome).VersionInfo.ProductVersion) }
+        if ($edge) { $found += ('Microsoft Edge {0}' -f (Get-Item -LiteralPath $edge).VersionInfo.ProductVersion) }
         $choice = (Get-Setting 'OCA_BROWSER' 'auto').ToLowerInvariant()
         if (-not $found.Count) {
-            Add-Result 'Browser' 'FAIL' 'neither Microsoft Edge nor Google Chrome was found' 'Install Microsoft Edge or Google Chrome (ask IT if you cannot).'
+            Add-Result 'Browser' 'FAIL' 'neither Google Chrome nor Microsoft Edge was found' 'Install Google Chrome (ask IT if you cannot).'
         } elseif ($choice -in @('edge', 'msedge') -and -not $edge) {
             Add-Result 'Browser' 'FAIL' ('settings.txt asks for Edge, which is not installed; found {0}' -f ($found -join ', ')) 'Set OCA_BROWSER=auto in settings.txt.'
         } elseif ($choice -eq 'chrome' -and -not $chrome) {
             Add-Result 'Browser' 'FAIL' ('settings.txt asks for Chrome, which is not installed; found {0}' -f ($found -join ', ')) 'Set OCA_BROWSER=auto in settings.txt.'
         } else {
-            $uses = if ($choice -eq 'chrome' -or -not $edge) { 'Google Chrome' } else { 'Microsoft Edge' }
-            Add-Result 'Browser' 'PASS' ('{0}; automation uses {1}' -f ($found -join ', '), $uses)
+            $uses = if ($choice -in @('edge', 'msedge') -or -not $chrome) { 'Microsoft Edge' } else { 'Google Chrome' }
+            $status = 'PASS'
+            $fix = ''
+            if (-not $chrome) { $status = 'WARN'; $fix = 'Install Google Chrome: OCA may keep loading in a company-managed Edge.' }
+            Add-Result 'Browser' $status ('{0}; automation uses {1}' -f ($found -join ', '), $uses) $fix
         }
     }
 

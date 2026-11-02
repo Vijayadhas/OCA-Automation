@@ -113,7 +113,7 @@ jobs:
           Write-Host ("Template download: HTTP {0}, {1} bytes" -f $template.StatusCode, $template.RawContentLength)
 
           # The OCA site is not reachable from GitHub, so the model fails at "Open OCA"; what is checked is
-          # that the packaged runner starts, launches the browser, logs its version and writes a result.
+          # that the packaged runner starts, launches Chrome, logs its version and writes a result.
           $job = @{ jobId = 'SMOKE-1'; modelNumber = 'P97048-B21'; modelType = 'Server'; isSolution = $false; isStorage = $false
                     quotationMode = 'aaS'; serviceType = 'Random'; generateEndBom = $false; enabled = $true
                     source = @{ kind = 'detailed-excel'; instructions = @() }; inputRow = 2 }
@@ -130,7 +130,7 @@ jobs:
           Write-Host $log
           Write-Host '------------------------'
           Write-Host "Run status: $($state.status) - $($state.message)"
-          $expected = @('Code version: commit .+ \(Windows package\)', 'Browser: Microsoft Edge', '\[1/1\] P97048-B21 - (Success|Failed|Unsupported)', 'Results written to')
+          $expected = @('Code version: commit .+ \(Windows package\)', 'Browser: Google Chrome', '\[1/1\] P97048-B21 - (Success|Failed|Unsupported)', 'Results written to')
           foreach ($pattern in $expected) { if ($log -notmatch $pattern) { throw "Activity log is missing: $pattern" } }
           $share = Invoke-WebRequest "$url/api/runs/$($run.id)/share" -UseBasicParsing
           Write-Host ("Share zip: {0} bytes" -f $share.RawContentLength)

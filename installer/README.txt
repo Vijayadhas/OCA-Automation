@@ -35,6 +35,6 @@ Uninstall: %LOCALAPPDATA%\Programs\OCA-Automation\Uninstall.cmd
 
 Browser
 -------
-OCA Automation uses Microsoft Edge, or Google Chrome when Edge is not installed. To choose one,
-set OCA_BROWSER=edge or OCA_BROWSER=chrome in settings.txt. The first run in each browser asks you
+OCA Automation uses Google Chrome, or Microsoft Edge when Chrome is not installed. To choose one,
+set OCA_BROWSER=chrome or OCA_BROWSER=edge in settings.txt, then close and reopen OCA Automation. The first run in each browser asks you
 to sign in to OCA once; the sign-in is then remembered.

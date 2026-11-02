@@ -9,7 +9,7 @@ export interface BrowserSessionOptions {
   trace: boolean;
   actionTimeoutMs: number;
   navigationTimeoutMs: number;
-  /** auto (default: Edge, then Chrome, then Playwright Chromium), edge, chrome or chromium; else OCA_BROWSER. */
+  /** auto (default: Chrome, then Edge, then Playwright Chromium), chrome, edge or chromium; else OCA_BROWSER. */
   browser?: string;
 }
 
@@ -24,7 +24,7 @@ export class BrowserSession {
     private readonly report: (message: string) => void = console.log,
   ) {}
 
-  /** The browser in use, once started (e.g. "Microsoft Edge"). */
+  /** The browser in use, once started (e.g. "Google Chrome"). */
   get browserName(): string | undefined {
     return this.channel ? BROWSER_NAMES[this.channel] : undefined;
   }
@@ -61,7 +61,7 @@ export class BrowserSession {
         if (next) this.report(`[WARN] ${BROWSER_NAMES[channel]} is not installed on this computer; trying ${BROWSER_NAMES[next]}`);
       }
     }
-    throw new Error(`No supported browser is installed (${missing.join(', ')} not found). Install Microsoft Edge or Google Chrome.`);
+    throw new Error(`No supported browser is installed (${missing.join(', ')} not found). Install Google Chrome or Microsoft Edge.`);
   }
 
   async start(): Promise<BrowserContext> {

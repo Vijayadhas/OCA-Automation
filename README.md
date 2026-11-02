@@ -20,14 +20,14 @@ and starts one run through the installed `OCA.exe` before publishing it.
 - Download: [OCA-Automation-Windows.zip](https://github.com/Vijayadhas/OCA-Automation/releases/latest/download/OCA-Automation-Windows.zip)
   (newest build of `main`; a `feature/*` branch publishes a pre-release named `preview-<branch>`).
 - Extract it and run `Setup.cmd`. It checks the computer first (Windows, package files, whether
-  `node.exe` and `OCA.exe` may run, Edge or Chrome, free space, the OCA website, GitHub, the dashboard
+  `node.exe` and `OCA.exe` may run, Chrome or Edge, free space, the OCA website, GitHub, the dashboard
   port), lists each check as PASS, WARN or FAIL, and saves `system-check.txt`. A FAIL stops the
   installation; `Check-System.cmd` runs only the checks.
 - Installs per user, without administrator rights: the app in `%LOCALAPPDATA%\Programs\OCA-Automation`,
   and the user's runs, browser profiles and `settings.txt` in `%LOCALAPPDATA%\OCA-Automation`, which
   updates keep. `Uninstall.cmd` is in the app folder.
-- Browser: Microsoft Edge, then Google Chrome, then Playwright's Chromium (`OCA_BROWSER` = `auto`,
-  `edge`, `chrome` or `chromium`). Each browser has its own sign-in profile.
+- Browser: Google Chrome, then Microsoft Edge, then Playwright's Chromium (`OCA_BROWSER` = `auto`,
+  `chrome`, `edge` or `chromium`). OCA kept loading in a company-managed Edge, so Chrome comes first. Each browser has its own sign-in profile.
 
 The package's code version line reads `commit <hash> <date> (Windows package)`. `installer/README.txt`
 is the user guide shipped in the zip.

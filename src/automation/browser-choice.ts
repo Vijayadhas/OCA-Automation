@@ -1,8 +1,9 @@
 /**
- * Which installed browser the automation drives. Office laptops always have Microsoft Edge, so it is
- * tried first; Google Chrome is the fallback, and Playwright's own Chromium (downloaded with
- * `npx playwright install chromium`) is the last resort. OCA_BROWSER picks one browser instead:
- * `edge`, `chrome` or `chromium` (`auto`, the default, tries them in that order).
+ * Which installed browser the automation drives. Google Chrome is tried first: on the team's
+ * company-managed laptops, OCA loads in Chrome but kept loading in a managed Microsoft Edge
+ * (tester, 2026-11-02). Edge is the fallback, and Playwright's own Chromium (downloaded with
+ * `npx playwright install chromium`) the last resort. OCA_BROWSER picks one browser instead:
+ * `chrome`, `edge` or `chromium` (`auto`, the default, tries them in that order).
  */
 export type BrowserChannel = 'msedge' | 'chrome' | 'chromium';
 
@@ -12,7 +13,7 @@ export const BROWSER_NAMES: Record<BrowserChannel, string> = {
   chromium: 'Playwright Chromium',
 };
 
-const AUTO_ORDER: BrowserChannel[] = ['msedge', 'chrome', 'chromium'];
+const AUTO_ORDER: BrowserChannel[] = ['chrome', 'msedge', 'chromium'];
 
 const ALIASES: Record<string, BrowserChannel[]> = {
   '': AUTO_ORDER,
@@ -27,7 +28,7 @@ const ALIASES: Record<string, BrowserChannel[]> = {
 export function browserOrder(setting: string | undefined = process.env.OCA_BROWSER): BrowserChannel[] {
   const key = (setting ?? '').trim().toLowerCase();
   const order = ALIASES[key];
-  if (!order) throw new Error(`OCA_BROWSER "${setting}" is not supported; use auto, edge, chrome or chromium`);
+  if (!order) throw new Error(`OCA_BROWSER "${setting}" is not supported; use auto, chrome, edge or chromium`);
   return [...order];
 }
 
