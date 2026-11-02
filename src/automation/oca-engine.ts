@@ -168,6 +168,7 @@ export class OcaEngine {
       result.endAllocatedMemory = endBom.endDetails.allocatedMemory;
       result.endServerCount = endBom.endDetails.server;
       result.endUsedCpuCore = endBom.endDetails.usedCpuCore;
+      result.bomTiers = endBom.tiers;
     }
     result.executionStatus = 'Success';
     result.endTime = new Date().toISOString();

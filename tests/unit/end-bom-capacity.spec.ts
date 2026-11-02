@@ -42,3 +42,33 @@ test('reports at once when OCA does not offer Auto-generate End BOM', async ({ p
     .toThrow('OCA does not offer Auto-generate End BOM for this model ("Currently not supported for auto generation. Use manual")');
   expect(Date.now() - started).toBeLessThan(15_000);
 });
+
+// End BOM Setup of a solution (screenshot, 2026-11-02): compute, storage and switch tiers in one table,
+// with an Include Billing Tier switch on the switch tiers and storage capacity in Written Usable GB/TB.
+// The switch markup is not captured yet; a checkbox stands in for it.
+test('reads every Start BOM tier with all visible columns for the BOM Details sheet', async ({ page }) => {
+  await page.setContent(`<table id="startbom_billingtier_table"><thead><tr>
+    <th>Billing Tier</th><th>Billing Tier Custom Name</th><th>Include Billing Tier <span class="help">?</span></th>
+    <th>Allocated Memory</th><th style="display:none">Previous Allocated Memory</th><th>Server</th><th>Used CPU Core</th>
+    <th>Written Usable GB</th><th>Written Usable TB</th><th>Fixed</th>
+  </tr></thead><tbody>
+    <tr><td>DL380 Gen11 #1 (64.0GB Memory) 2FD</td><td>DL380 Gen11 #1 (64.0GB Memory) 2FD</td><td></td>
+      <td>378</td><td style="display:none">0</td><td>7</td><td>112</td><td></td><td></td><td></td></tr>
+    <tr><td>HPE GreenLake for PC3000 with Alletra Storage MP #14D</td><td>HPE GreenLake for PC3000 with Alletra Storage MP #14D</td><td></td>
+      <td></td><td style="display:none"></td><td></td><td></td><td>177603</td><td>177</td><td></td></tr>
+    <tr><td>SN8325H Switch #1 451</td><td>SN8325H Switch #1 451</td><td><label><input type="checkbox"></label></td>
+      <td></td><td style="display:none"></td><td></td><td></td><td></td><td></td><td>1</td></tr>
+    <tr><td>SN8325H Switch #2 0BC</td><td>SN8325H Switch #2 0BC</td><td><label><input type="checkbox" checked></label></td>
+      <td></td><td style="display:none"></td><td></td><td></td><td></td><td></td><td>1</td></tr>
+  </tbody></table>`);
+  const rows = await new EndBom(page).readBillingTierRows('startbom_billingtier_table');
+  expect(rows).toHaveLength(4);
+  expect(Object.keys(rows![0])).toEqual(['Billing Tier', 'Billing Tier Custom Name', 'Include Billing Tier', 'Allocated Memory',
+    'Server', 'Used CPU Core', 'Written Usable GB', 'Written Usable TB', 'Fixed']);
+  expect(rows![0]).toMatchObject({ 'Billing Tier': 'DL380 Gen11 #1 (64.0GB Memory) 2FD', 'Allocated Memory': '378', Server: '7', 'Used CPU Core': '112' });
+  expect(rows![1]).toMatchObject({ 'Written Usable GB': '177603', 'Written Usable TB': '177' });
+  expect(rows![2]).toMatchObject({ 'Billing Tier': 'SN8325H Switch #1 451', 'Include Billing Tier': 'No', Fixed: '1' });
+  expect(rows![3]).toMatchObject({ 'Include Billing Tier': 'Yes' });
+  // The Results sheet's joined columns still come from the same table.
+  expect(await new EndBom(page).readBillingTierTable('startbom_billingtier_table')).toMatchObject({ allocatedMemory: '378', server: '7', usedCpuCore: '112' });
+});

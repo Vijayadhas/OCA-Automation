@@ -213,7 +213,10 @@ Do not put credentials in the workbook.
 ## Results and recovery
 
 The CLI creates `<input-name>-results.xlsx` in the output directory, never overwriting the input.
-It contains `Results` and `Summary` sheets. Each job is flushed immediately. Normal runs execute every enabled job again,
+It contains `Results`, `Summary`, `BOM Details` and `BOM UCIDs` sheets. `BOM Details` has one row per billing
+tier of each model's Start and End BOM, read on OCA's End BOM Setup page just before Associate End BOM, with
+every column OCA shows there (Billing Tier, Custom Name, Include Billing Tier, Allocated Memory, Server, Used CPU
+Core, Written Usable GB/TB, Fixed, ...). Each job is flushed immediately. Normal runs execute every enabled job again,
 including previously successful jobs; `--retry-failed` selects only failed or unsupported prior jobs.
 
 Failure artifacts are stored under `output/screenshots`, `output/html`, `output/traces`, and `output/logs`. SIGINT or

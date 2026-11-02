@@ -2,6 +2,7 @@ import { expect, type Page } from '@playwright/test';
 import { readBomUcid } from '../core/excel';
 import { waitForBlockingOverlay } from '../core/waits';
 import type { PageSnapshot } from '../reporting/html-capture';
+import type { BomTierRecord } from '../models/automation-result';
 
 export interface BomCapacityDetails {
   billingTier: string;
@@ -18,6 +19,8 @@ export interface EndBomOutcome {
   associated: boolean;
   startDetails: BomCapacityDetails;
   endDetails: BomCapacityDetails;
+  /** Every billing tier of both tables, with all visible columns. */
+  tiers: BomTierRecord[];
 }
 
 const emptyDetails = (): BomCapacityDetails => ({
@@ -75,6 +78,13 @@ export class EndBom {
     await this.snapshot?.('End BOM generated');
     const startDetails = await this.readCapacityDetails('Start BOM UCID');
     const endDetails = await this.readCapacityDetails('End BOM UCID');
+    // Every tier and column of both tables, as associated, for the BOM Details sheet.
+    const tiers: BomTierRecord[] = [];
+    for (const [bom, ucid, tableId] of [['Start', startBomId, 'startbom_billingtier_table'], ['End', endBomId, 'endbom_billingtier_table']] as const) {
+      const rows = await this.readBillingTierRows(tableId).catch(() => null) ?? [];
+      tiers.push(...rows.map((values) => ({ bom, ucid, values })));
+      console.log(`[INFO] ${bom} BOM ${ucid}: ${rows.length} billing tier(s) read${rows.length ? ` (${Object.keys(rows[0]).join(', ')})` : ''}`);
+    }
 
     const associate = this.page.getByRole('button', { name: /Associate End BOM/i }).filter({ visible: true }).first();
     await expect(associate).toBeVisible({ timeout: 60_000 });
@@ -96,27 +106,58 @@ export class EndBom {
     console.log('[STEP] Completing End BOM');
     await done.click({ force: true });
     await waitForBlockingOverlay(this.page);
-    return { status: 'Generated and associated', startBomId, endBomId, associated: true, startDetails, endDetails };
+    return { status: 'Generated and associated', startBomId, endBomId, associated: true, startDetails, endDetails, tiers };
   }
 
   /**
-   * Reads a billing-tier table on OCA's End BOM page (#startbom_billingtier_table or
-   * #endbom_billingtier_table). The tables carry hidden columns (Previous Allocated Memory,
-   * Fixed Servers, ...) and hidden duplicate cells, so only visible headers and cells are
-   * paired. Several tiers are joined with "; ".
+   * Every billing tier of a BOM table on OCA's End BOM page (#startbom_billingtier_table or
+   * #endbom_billingtier_table), one record per tier with each visible column under its header:
+   * Billing Tier, Billing Tier Custom Name, Include Billing Tier, Allocated Memory, Server, Used CPU
+   * Core, Written Usable GB/TB, Fixed, or whatever columns the model's table shows. The tables carry
+   * hidden columns (Previous Allocated Memory, Fixed Servers, ...) and hidden duplicate cells, so only
+   * visible headers and cells are paired. A switch or checkbox in a cell reads Yes or No; an empty
+   * cell with an entry box reads the box's value.
    */
-  async readBillingTierTable(tableId: string): Promise<BomCapacityDetails | null> {
+  async readBillingTierRows(tableId: string): Promise<Array<Record<string, string>> | null> {
     const table = this.page.locator(`[id=${JSON.stringify(tableId)}]`).first();
     if (!await table.count()) return null;
     // Inline callbacks only: named functions inside evaluate get tsx's __name helper, absent in the page.
     const read = await table.evaluate((element) => ({
       headers: Array.from(element.querySelectorAll('thead th')).filter((cell) => cell.getClientRects().length > 0)
-        .map((cell) => (cell.textContent ?? '').replace(/\s+/g, ' ').trim()),
+        .map((cell) => (cell.textContent ?? '').replace(/\s+/g, ' ').trim().replace(/\s*\?$/, '')),
       rows: Array.from(element.querySelectorAll('tbody tr')).filter((row) => row.getClientRects().length > 0)
         .map((row) => Array.from(row.querySelectorAll('td')).filter((cell) => cell.getClientRects().length > 0)
-          .map((cell) => (cell.textContent ?? '').replace(/\s+/g, ' ').trim())),
+          .map((cell) => {
+            const text = (cell.textContent ?? '').replace(/\s+/g, ' ').trim();
+            const toggle = cell.querySelector('input[type="checkbox"], input[type="radio"], [role="switch"], [aria-checked]');
+            if (toggle) {
+              const on = toggle instanceof HTMLInputElement ? toggle.checked : toggle.getAttribute('aria-checked') === 'true';
+              return text ? `${on ? 'Yes' : 'No'} (${text})` : on ? 'Yes' : 'No';
+            }
+            const entry = cell.querySelector('input:not([type="hidden"]), select, textarea') as HTMLInputElement | null;
+            return !text && entry ? (entry.value ?? '').trim() : text;
+          })),
     }));
-    if (!read.headers.length || !read.rows.length) return null;
+    if (!read.headers.length) return null;
+    const names = read.headers.map((header, index) => header || `Column ${index + 1}`);
+    return read.rows.filter((row) => row.some(Boolean)).map((row) => {
+      const record: Record<string, string> = {};
+      names.forEach((name, index) => {
+        const key = Object.prototype.hasOwnProperty.call(record, name) ? `${name} (${index + 1})` : name;
+        record[key] = row[index] ?? '';
+      });
+      return record;
+    });
+  }
+
+  /**
+   * The five capacity columns of a BOM table for the Results sheet; several tiers are joined with
+   * "; ". The BOM Details sheet has every column of every tier (readBillingTierRows).
+   */
+  async readBillingTierTable(tableId: string): Promise<BomCapacityDetails | null> {
+    const records = await this.readBillingTierRows(tableId);
+    if (!records?.length) return null;
+    const read = { headers: Object.keys(records[0]), rows: records.map((record) => Object.values(record)) };
     const column = (pattern: RegExp) => {
       const index = read.headers.findIndex((header) => pattern.test(header));
       return index < 0 ? '' : read.rows.map((row) => row[index] ?? '').filter(Boolean).join('; ');

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import * as XLSX from 'xlsx';
-import type { AutomationResult } from '../models/automation-result';
+import type { AutomationResult, BomTierRecord } from '../models/automation-result';
 
 const RESULT_HEADERS = [
   'Job ID', 'Model Number', 'Execution Status', 'UCID', 'Quotation Mode', 'OCA Config Status',
@@ -12,6 +12,9 @@ const RESULT_HEADERS = [
   'Selected Components', 'Start Time', 'End Time', 'Duration',
   'Retry Count', 'Error Step', 'Error Message', 'Screenshot Path', 'Trace Path',
 ] as const;
+
+/** First columns of the BOM Details sheet; the tier columns OCA showed follow, in the order first seen. */
+const BOM_DETAIL_HEADERS = ['Job ID', 'Model Number', 'BOM', 'BOM UCID', 'Tier'] as const;
 
 const BOM_UCID_HEADERS = [
   'Job ID', 'Model Number', 'Start BOM UCID', 'End BOM UCID', 'End BOM Associated', 'Execution Status', 'Comments',
@@ -42,6 +45,21 @@ export class ExcelWriter {
     const workbook = XLSX.readFile(this.outputPath);
     const sheet = workbook.Sheets.Results;
     if (!sheet) return;
+    // Earlier runs' BOM Details rows, so a rerun of other models keeps them.
+    const tiersByJob = new Map<string, BomTierRecord[]>();
+    const detailSheet = workbook.Sheets['BOM Details'];
+    const detailRows = detailSheet ? XLSX.utils.sheet_to_json<Record<string, string | number>>(detailSheet, { defval: '' }) : [];
+    for (const row of detailRows) {
+      const jobId = String(row['Job ID'] ?? '').trim();
+      if (!jobId) continue;
+      const values: Record<string, string> = {};
+      for (const [key, value] of Object.entries(row)) {
+        if (!(BOM_DETAIL_HEADERS as readonly string[]).includes(key)) values[key] = String(value);
+      }
+      const list = tiersByJob.get(jobId) ?? [];
+      list.push({ bom: String(row.BOM) === 'End' ? 'End' : 'Start', ucid: String(row['BOM UCID'] ?? ''), values });
+      tiersByJob.set(jobId, list);
+    }
     const rows = XLSX.utils.sheet_to_json<Record<string, string | number>>(sheet, { defval: '' });
     for (const row of rows) {
       const jobId = String(row['Job ID'] ?? '').trim();
@@ -61,6 +79,7 @@ export class ExcelWriter {
         startUsedCpuCore: String(row['Start Used CPU Core'] ?? ''), endBillingTier: String(row['End Billing Tier'] ?? ''),
         endBillingTierCustomName: String(row['End Billing Tier Custom Name'] ?? ''), endAllocatedMemory: String(row['End Allocated Memory'] ?? ''),
         endServerCount: String(row['End Server'] ?? ''), endUsedCpuCore: String(row['End Used CPU Core'] ?? ''),
+        bomTiers: tiersByJob.get(jobId) ?? [],
         selectedComponents: String(row['Selected Components'] ?? ''),
         startTime: String(row['Start Time'] ?? ''), endTime: String(row['End Time'] ?? ''),
         duration: Number(row.Duration ?? 0), retryCount: Number(row['Retry Count'] ?? 0),
@@ -104,6 +123,20 @@ export class ExcelWriter {
     const resultsSheet = XLSX.utils.json_to_sheet(resultRows, { header: [...RESULT_HEADERS] });
     XLSX.utils.book_append_sheet(workbook, resultsSheet, 'Results');
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(summary), 'Summary');
+    // Start and End BOM: one row per billing tier with every column OCA showed (End BOM Setup page).
+    const tierColumns: string[] = [];
+    for (const tier of values.flatMap((result) => result.bomTiers ?? [])) {
+      for (const key of Object.keys(tier.values)) if (!tierColumns.includes(key)) tierColumns.push(key);
+    }
+    const detailRows = values.flatMap((result) => {
+      const counters = { Start: 0, End: 0 };
+      return (result.bomTiers ?? []).map((tier) => ({
+        'Job ID': result.jobId, 'Model Number': result.modelNumber, BOM: tier.bom, 'BOM UCID': tier.ucid,
+        Tier: String(counters[tier.bom] += 1), ...tier.values,
+      }));
+    });
+    const detailSheet = XLSX.utils.json_to_sheet(detailRows, { header: [...BOM_DETAIL_HEADERS, ...tierColumns] });
+    XLSX.utils.book_append_sheet(workbook, detailSheet, 'BOM Details');
     // The UCIDs the team records in its tracker, one row per model, at the end of the workbook.
     const bomRows = values.map((result) => ({
       'Job ID': result.jobId, 'Model Number': result.modelNumber,

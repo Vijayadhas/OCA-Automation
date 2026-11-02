@@ -1,5 +1,16 @@
 export type ExecutionStatus = 'Success' | 'Failed' | 'Skipped' | 'Unsupported';
 
+/**
+ * One billing tier row of the Start or End BOM table on OCA's End BOM page, with every visible
+ * column under OCA's own header (Billing Tier, Include Billing Tier, Allocated Memory, Server,
+ * Used CPU Core, Written Usable GB/TB, Fixed, ...). Columns differ by model, so they are kept as read.
+ */
+export interface BomTierRecord {
+  bom: 'Start' | 'End';
+  ucid: string;
+  values: Record<string, string>;
+}
+
 export interface AutomationResult {
   jobId: string;
   modelNumber: string;
@@ -24,6 +35,8 @@ export interface AutomationResult {
   endAllocatedMemory: string;
   endServerCount: string;
   endUsedCpuCore: string;
+  /** Every billing tier of the Start and End BOM, read just before Associate End BOM. */
+  bomTiers: BomTierRecord[];
   selectedComponents: string;
   startTime: string;
   endTime: string;
@@ -60,6 +73,7 @@ export function createPendingResult(jobId: string, modelNumber: string, retryCou
     endAllocatedMemory: '',
     endServerCount: '',
     endUsedCpuCore: '',
+    bomTiers: [],
     selectedComponents: '',
     startTime: new Date().toISOString(),
     endTime: '',

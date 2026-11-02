@@ -47,3 +47,32 @@ test('lists each model\'s Start and End BOM UCIDs on a last sheet, with the fail
       Comments: 'Open BOM and Billing Tier Setup: Billing Tier Setup dialog should close after OK' },
   ]);
 });
+
+test('writes every Start and End BOM tier to the BOM Details sheet and keeps it on the next run', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'oca-results-'));
+  const input = path.join(directory, 'models.xlsx');
+  const result = createPendingResult('JOB-1', 'S8J33A');
+  result.executionStatus = 'Success';
+  result.bomTiers = [
+    { bom: 'Start', ucid: '5158140010-01', values: { 'Billing Tier': 'DL380 Gen11 #1', 'Allocated Memory': '378', Server: '7', 'Used CPU Core': '112' } },
+    { bom: 'Start', ucid: '5158140010-01', values: { 'Billing Tier': 'Alletra Storage MP #14D', 'Written Usable GB': '177603', 'Written Usable TB': '177' } },
+    { bom: 'End', ucid: '5158140010-02', values: { 'Billing Tier': 'DL380 Gen11 #1', 'Allocated Memory': '1134', Server: '21', 'Used CPU Core': '336' } },
+  ];
+  await new ExcelWriter(directory, input).writeResult(result);
+  const other = createPendingResult('JOB-2', 'P97048-B21');
+  // A later run of another model keeps JOB-1's rows.
+  const writer = new ExcelWriter(directory, input);
+  await writer.writeResult(other);
+
+  const workbook = XLSX.readFile(writer.outputPath);
+  expect(workbook.SheetNames).toEqual(['Results', 'Summary', 'BOM Details', 'BOM UCIDs']);
+  const sheet = workbook.Sheets['BOM Details'];
+  const header = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1 })[0];
+  expect(header).toEqual(['Job ID', 'Model Number', 'BOM', 'BOM UCID', 'Tier', 'Billing Tier', 'Allocated Memory', 'Server',
+    'Used CPU Core', 'Written Usable GB', 'Written Usable TB']);
+  const rows = XLSX.utils.sheet_to_json<Record<string, string>>(sheet, { defval: '' });
+  expect(rows).toHaveLength(3);
+  expect(rows[0]).toMatchObject({ 'Job ID': 'JOB-1', BOM: 'Start', 'BOM UCID': '5158140010-01', Tier: '1', 'Billing Tier': 'DL380 Gen11 #1', Server: '7' });
+  expect(rows[1]).toMatchObject({ BOM: 'Start', Tier: '2', 'Written Usable TB': '177' });
+  expect(rows[2]).toMatchObject({ BOM: 'End', 'BOM UCID': '5158140010-02', Tier: '1', 'Allocated Memory': '1134' });
+});
