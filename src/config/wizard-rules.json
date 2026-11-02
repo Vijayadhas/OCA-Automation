@@ -1,0 +1,113 @@
+{
+  "$comment": "Solution Wizard dropdown rules, applied to random picks by src/automation/wizard-rules.ts. A rule limits the dropdown whose label matches 'field' (regex, any case), when 'when' holds (another dropdown's pick names one of 'products'). 'only' keeps those products, 'exclude' removes them, 'prefer' picks among them when offered. Products are the part numbers in brackets at the start of an option, e.g. '(R4U33A) HPE Alletra 5010'.",
+  "ruleSets": [
+    {
+      "name": "HPE Alletra 5000",
+      "source": "OCA rule source Alletra5000Solution (essn.storage.network.nimblestorage.alletra5000), shared by the user 2026-11-03. Base arrays: 5010 = R4U33A, R7L31A; 5010H = S0U33A, S1D81A; 5030 = R4U34A, R7L32A; 5050 = R4U35A, R7L33A.",
+      "rules": [
+        {
+          "field": "^HDD Capacity$",
+          "when": { "field": "^Array$", "products": ["R4U33A", "R7L31A"] },
+          "exclude": ["R4U46A", "S0U34A"],
+          "message": "5010: HDD R4U46A is supported on 5030/5050 only, and S0U34A on 5010H only (rule2_SupportHDD, rule3_SupportHDD)"
+        },
+        {
+          "field": "^HDD Capacity$",
+          "when": { "field": "^Array$", "products": ["S0U33A", "S1D81A"] },
+          "only": ["S0U34A"],
+          "message": "5010H: HDD Capacity S0U34A only (rule3_SupportHDD)"
+        },
+        {
+          "field": "^HDD Capacity$",
+          "when": { "field": "^Array$", "products": ["R4U34A", "R7L32A", "R4U35A", "R7L33A"] },
+          "exclude": ["S0U34A"],
+          "message": "5030/5050: HDD S0U34A is supported on 5010H only (rule3_SupportHDD)"
+        },
+        {
+          "field": "^Bank [AB] Cache$",
+          "when": { "field": "^Array$", "products": ["R4U33A", "R7L31A"] },
+          "exclude": ["R4U50A", "S0U36A"],
+          "message": "5010: cache R4U50A is supported on 5030/5050 only, and S0U36A on 5010H only (rule2_SupportCache, rule3_SupportCache)"
+        },
+        {
+          "field": "^Bank [AB] Cache$",
+          "when": { "field": "^Array$", "products": ["S0U33A", "S1D81A"] },
+          "only": ["S0U36A"],
+          "message": "5010H: cache S0U36A only (rule3_SupportCache)"
+        },
+        {
+          "field": "^Bank [AB] Cache$",
+          "when": { "field": "^Array$", "products": ["R4U34A", "R7L32A", "R4U35A", "R7L33A"] },
+          "exclude": ["S0U36A"],
+          "message": "5030/5050: cache S0U36A is supported on 5010H only (rule3_SupportCache)"
+        },
+        {
+          "field": "^Bank [AB] Cache$",
+          "when": { "field": "^HDD Capacity$", "products": ["R4U43A"] },
+          "exclude": ["R8F35A"],
+          "message": "Cache R8F35A is not supported with HDD Capacity R4U43A (cacheSupport_HDD_R4U43A)"
+        },
+        {
+          "field": "^Bank [AB] Cache$",
+          "when": { "field": "^HDD Capacity$", "products": ["R4U44A", "R4U45A"] },
+          "exclude": ["R8F35A", "R4U47A"],
+          "message": "Cache R8F35A and R4U47A are not supported with HDD Capacity R4U44A/R4U45A (cacheSupport_HDD_R4U44A, _R4U45A)"
+        },
+        {
+          "field": "^Bank [AB] Cache$",
+          "when": { "field": "^HDD Capacity$", "products": ["R4U46A"] },
+          "exclude": ["R8F35A", "R4U47A", "R4U48A"],
+          "message": "Cache R8F35A, R4U47A and R4U48A are not supported with HDD Capacity R4U46A (cacheSupport_HDD_R4U46A)"
+        },
+        {
+          "field": "^Bank B Cache$",
+          "when": { "field": "^Bank A Cache$", "products": ["R8F35A"] },
+          "only": ["R8F35A", "R4U47A"],
+          "message": "Bank A R8F35A: Bank B R8F35A or R4U47A (BankAandB_rule1)"
+        },
+        {
+          "field": "^Bank B Cache$",
+          "when": { "field": "^Bank A Cache$", "products": ["R4U47A"] },
+          "only": ["R8F35A", "R4U47A", "R4U48A"],
+          "message": "Bank A R4U47A: Bank B R8F35A, R4U47A or R4U48A (BankAandB_rule2)"
+        },
+        {
+          "field": "^Bank B Cache$",
+          "when": { "field": "^Bank A Cache$", "products": ["R4U48A"] },
+          "only": ["R4U47A", "R4U48A", "R4U49A"],
+          "message": "Bank A R4U48A: Bank B R4U47A, R4U48A or R4U49A (BankAandB_rule3)"
+        },
+        {
+          "field": "^Bank B Cache$",
+          "when": { "field": "^Bank A Cache$", "products": ["R4U49A"] },
+          "only": ["R4U48A", "R4U49A", "R4U50A"],
+          "message": "Bank A R4U49A: Bank B R4U48A, R4U49A or R4U50A (BankAandB_rule4)"
+        },
+        {
+          "field": "^Bank B Cache$",
+          "when": { "field": "^Bank A Cache$", "products": ["R4U50A"] },
+          "only": ["R4U49A", "R4U50A"],
+          "message": "Bank A R4U50A: Bank B R4U49A or R4U50A (BankAandB_rule5)"
+        },
+        {
+          "field": "power supply",
+          "when": { "field": "^Array$", "products": ["R4U35A", "R7L33A"] },
+          "exclude": ["S2V21A", "S2V21B"],
+          "message": "5050: power supply S2V21A/S2V21B is supported on 5010/5010H/5030 only (powerSupply_R1)"
+        },
+        {
+          "field": "power supply",
+          "when": { "field": "^Array$", "products": ["R4U33A", "R7L31A", "S0U33A", "S1D81A", "R4U34A", "R7L32A"] },
+          "exclude": ["S2V19A", "S2V19B"],
+          "message": "5010/5010H/5030: power supply S2V19A/S2V19B is supported on 5050 only (powerSupply_R2)"
+        },
+        {
+          "field": "software",
+          "when": { "field": "^Array$", "products": ["R4U33A", "R7L31A", "S0U33A", "S1D81A", "R4U34A", "R7L32A", "R4U35A", "R7L33A"] },
+          "prefer": ["Q8G27B"],
+          "message": "Q8G27B is the required NOS software for Alletra 5000 (Nimble) solutions (SoftwareBlueNote)"
+        }
+      ]
+    }
+  ]
+}

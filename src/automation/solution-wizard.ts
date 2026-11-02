@@ -3,6 +3,7 @@ import type { ComponentInstruction } from '../models/component-instruction';
 import { waitForBlockingOverlay } from '../core/waits';
 import { QuantityHandler } from '../components/quantity-handler';
 import { ComponentEngine } from './component-engine';
+import { applyWizardRules } from './wizard-rules';
 
 export async function openDhciDriveEnclosure(page: Page): Promise<void> {
   const header = page.locator('#section_header_driveEnclosureSection, [id*="section_header" i][id*="driveEnclosure" i]')
@@ -187,15 +188,22 @@ export class SolutionWizard {
       const name = field.label || `dropdown ${field.index + 1}`;
       const requested = this.requestedValue(instructions.find((item) => field.label
         && item.section.trim().toLowerCase() === field.label.toLowerCase()));
+      // OCA's product rules for this dropdown (src/config/wizard-rules.json), given the wizard's other picks.
+      const ruled = applyWizardRules(field.label, candidates, all.filter((item) => item.index !== field.index && !item.empty && item.label)
+        .map((item) => ({ label: item.label, text: item.value })));
+      if (ruled.applied.length) console.log(`[INFO] Solution Wizard ${name} follows OCA rule(s): ${ruled.applied.join(' | ')}`);
+      if (ruled.skipped.length) console.log(`[WARN] Solution Wizard ${name}: no option meets ${ruled.skipped.join(' | ')}; that rule is not applied`);
+      // A value Excel names is used as given.
       const picked = (requested ? candidates.find((option) => option.value.toLowerCase() === requested.toLowerCase()
         || option.text.toLowerCase().includes(requested.toLowerCase())) : undefined)
-        ?? candidates[Math.floor(Math.random() * candidates.length)];
+        ?? ruled.candidates[Math.floor(Math.random() * ruled.candidates.length)];
       if (!picked) {
         console.log(`[WARN] Solution Wizard ${name} has no selectable value; leaving it to OCA`);
         skipped.add(field.index);
         continue;
       }
-      console.log(`[STEP] ${field.minimum ? `Minimum ${field.minimum} for` : requested ? 'Excel' : 'Random'} Solution Wizard ${name}: ${picked.text}`);
+      const how = field.minimum ? `Minimum ${field.minimum} for` : requested ? 'Excel' : ruled.applied.length ? 'Rule-checked random' : 'Random';
+      console.log(`[STEP] ${how} Solution Wizard ${name}: ${picked.text}`);
       const select = selects.nth(field.index);
       await select.evaluate((element) => (element.closest('.wizard_dropdown, .form-container-border') ?? element)
         .scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }));
