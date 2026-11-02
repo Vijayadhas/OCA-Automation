@@ -114,6 +114,14 @@ export class OcaEngine {
       const selections = await this.measure('Configure Storage model', () => new StorageFlow(this.activePage).configure());
       result.selectedComponents = selections.map((item) =>
         `${item.label}: ${item.productNumber || item.description} x${item.quantity}`).join('; ');
+      // User, 2026-11-02: a storage model (not a wizard) with a Storage Devices section gets an HDD and an SSD
+      // before Services and End BOM.
+      this.currentStep = 'Storage Devices';
+      const drives = await this.measure('Storage Devices', () => this.components.selectStorageDrives());
+      if (drives.length) {
+        result.selectedComponents += `; ${drives.map((item) => `Storage Devices ${item.kind}: ${item.productNumber} x${item.quantity}`).join('; ')}`;
+        await this.options.html?.step(this.activePage, 'Storage Devices');
+      }
     } else if (useSolutionWizard) {
       this.currentStep = 'Configure Solution Wizard';
       const selections = await this.measure('Configure Solution Wizard', () =>

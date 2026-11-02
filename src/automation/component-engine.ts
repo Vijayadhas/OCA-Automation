@@ -185,6 +185,17 @@ function isPickable(row: RowInfo): boolean {
     && !isMemoryBlankProduct(row.description) && (row.hasQuantity || row.hasRadio));
 }
 
+/** Drive kinds a storage model's Storage Devices section is filled with, in this order. */
+export const STORAGE_DRIVE_KINDS: RequiredKind[] = [
+  { name: 'HDD', matches: (text) => /\bHDDs?\b|\bhard (?:disk )?drives?\b/i.test(text) },
+  { name: 'SSD', matches: (text) => /\bSSDs?\b|\bsolid[- ]state\b/i.test(text) },
+];
+
+/** What a drive row is recognised by: its description, or its choice title when the description names no drive kind. */
+export function driveText(description: string, choiceTitle: string): string {
+  return STORAGE_DRIVE_KINDS.some((kind) => kind.matches(description)) ? description : `${description} ${choiceTitle}`;
+}
+
 interface RandomPolicy { quantities: number[]; radioOnly: boolean; limitWatts: boolean }
 
 /** An OCA error rule on a choice: its text, its own words, the choices it links and the products it names. */
@@ -454,6 +465,56 @@ export class ComponentEngine {
     }, REPAIR_CANDIDATE_TRIES);
     console.log(`[STEP] ${label}: ${picked.productNumber} x${picked.quantity}`);
     return { ...picked, choiceTitle: target.title };
+  }
+
+  /**
+   * Storage model on the Storage route (not a wizard), after its storage parts: when the Menu has a
+   * Storage Devices section, one random HDD and one random SSD are selected there, each with the
+   * smallest quantity OCA offers (or the choice's own OCA rule), so Services and End BOM follow with
+   * drives in the configuration. A drive is recognised by its product description (else its choice
+   * title); a kind already selected is kept, and a kind the model does not offer is skipped.
+   */
+  async selectStorageDrives(sectionName = 'Storage Devices'): Promise<Array<Selection & { kind: string }>> {
+    const section = await this.findSection(sectionName);
+    if (!section) {
+      console.log(`[SKIP] ${sectionName} section is not offered for this model`);
+      return [];
+    }
+    await this.open(section);
+    const picked: Array<Selection & { kind: string }> = [];
+    for (const kind of STORAGE_DRIVE_KINDS) {
+      const candidates: Array<{ row: Locator; productNumber: string; description: string; choiceId: string }> = [];
+      let kept: (Selection & { kind: string }) | null = null;
+      for (const choice of (await this.choices(section)).filter((item) => item.rows > 0)) {
+        for (const row of await this.rowInfo(this.choiceRows(choice.id))) {
+          if (!kind.matches(driveText(row.description, choice.title))) continue;
+          if (!kept && row.productNumber && Number(row.quantity) > 0) {
+            kept = { productNumber: row.productNumber, description: row.description, quantity: Number(row.quantity), kind: kind.name };
+          }
+          if (isPickable(row)) {
+            candidates.push({ row: this.page.locator(`[id=${JSON.stringify(row.id)}]`), productNumber: row.productNumber, description: row.description, choiceId: choice.id });
+          }
+        }
+      }
+      const label = `${section.title} ${kind.name}`;
+      if (kept) {
+        console.log(`[INFO] ${label} ${kept.productNumber} x${kept.quantity} is already selected; keeping it`);
+        picked.push(kept);
+        continue;
+      }
+      if (!candidates.length) {
+        console.log(`[SKIP] No ${kind.name} product is offered in ${section.title}`);
+        continue;
+      }
+      const selection = await this.tryRandomCandidates(label, candidates, async (candidate) => {
+        const set = await this.quantities.set(candidate.row, candidate.productNumber, 1, false, { acceptOffered: true });
+        const committed = await this.enforceQuantityRule(candidate.choiceId, candidate.row, candidate.productNumber, set);
+        return { productNumber: candidate.productNumber, description: candidate.description, quantity: committed };
+      }, REPAIR_CANDIDATE_TRIES);
+      console.log(`[STEP] ${label}: ${selection.productNumber} x${selection.quantity}`);
+      picked.push({ ...selection, kind: kind.name });
+    }
+    return picked;
   }
 
   async findProductRow(productNumber: string, description?: string): Promise<Locator> {
