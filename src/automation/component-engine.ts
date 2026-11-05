@@ -199,6 +199,40 @@ export function newestGeneration<T extends { description: string }>(candidates: 
   return newest ? candidates.filter((candidate) => generationOf(candidate.description) === newest) : candidates;
 }
 
+/**
+ * OCA's "DIMM qty per CPU" rule as a function of the selected processor, giving the allowed DIMMs per CPU
+ * (above 0); null when the text is not such a rule. Conditional form: "If any of these processors (A, B) is
+ * selected, Then the following DIMM qty per CPU are allowed 0, 1, 2, 4, 8 Else, for all other processor SKUs,
+ * only the following DIMM qty per CPU are allowed 1, 2, 4, 6, 8, 12"; plain form: "... DIMM qty per CPU are allowed 1, 2".
+ */
+export function dimmPerCpuRule(text: string): ((processor: string) => number[]) | null {
+  const clean = text.replace(/\s+/g, ' ');
+  const numbers = (list: string) => list.split(',').map((item) => Number(item.trim())).filter((value) => Number.isInteger(value) && value > 0);
+  const conditional = /If any of these processors \(([^)]*)\) (?:is|are) selected,?\s*Then the following DIMM qty per CPU (?:are|is) allowed:?\s*([\d,\s]+?)\s*Else\b.*?DIMM qty per CPU (?:are|is) allowed:?\s*([\d,\s]+)/i.exec(clean);
+  if (conditional) {
+    const listed = conditional[1].split(',').map((item) => item.trim().toUpperCase()).filter(Boolean);
+    const then = numbers(conditional[2]);
+    const otherwise = numbers(conditional[3]);
+    return (processor) => (listed.includes(processor.trim().toUpperCase()) ? then : otherwise);
+  }
+  const plain = /DIMM qty per CPU (?:are|is) allowed:?\s*([\d,\s]+)/i.exec(clean);
+  if (!plain) return null;
+  const allowed = numbers(plain[1]);
+  return () => allowed;
+}
+
+/**
+ * The Memory quantity a DIMM-per-CPU rule asks for: the current one when it is allowed, else the smallest
+ * allowed total (per CPU × processors) at or above it, else the largest. null when nothing is allowed.
+ */
+export function dimmTotalFor(current: number, processors: number, allowedPerCpu: number[]): number | null {
+  const cpus = Math.max(1, processors);
+  const totals = [...new Set(allowedPerCpu.filter((value) => value > 0).map((value) => value * cpus))].sort((a, b) => a - b);
+  if (!totals.length) return null;
+  if (totals.includes(current)) return current;
+  return totals.find((total) => total >= current) ?? totals[totals.length - 1];
+}
+
 /** Drive kinds a storage model's Storage Devices section is filled with, in this order. */
 export const STORAGE_DRIVE_KINDS: RequiredKind[] = [
   { name: 'HDD', matches: (text) => /\bHDDs?\b|\bhard (?:disk )?drives?\b/i.test(text) },
@@ -916,6 +950,41 @@ export class ComponentEngine {
    * of that kind are selected in the choice than allowed (a Smart Chassis template added a PCIe and
    * an OROC 8SFF cable kit). The extra ones are set to 0, keeping a random allowed number.
    */
+  /**
+   * OCA's memory population rule (P46252-B21, Alletra Storage Server 4120, 2026-11-05: on Additional
+   * Processors, linking Memory and Processor): "If any of these processors (P50810-B21, …) is selected, Then
+   * the following DIMM qty per CPU are allowed 0, 1, 2, 4, 8 Else, for all other processor SKUs, only the
+   * following DIMM qty per CPU are allowed 1, 2, 4, 6, 8, 12". The run had 2 processors and 1 DIMM, and the
+   * Processor repair only kept the processor. The Memory quantity is set to the smallest allowed total
+   * (DIMMs per CPU × processors) at or above the current one.
+   */
+  private async repairDimmPerCpuRule(choice: MenuChoice): Promise<boolean> {
+    for (const rule of await this.choiceRules(choice.id)) {
+      const allowedFor = dimmPerCpuRule(rule.ownText);
+      if (!allowedFor) continue;
+      const processorSection = await this.findSection('Processor');
+      const memorySection = await this.findSection('Memory');
+      if (!processorSection || !memorySection) return false;
+      await this.open(processorSection);
+      const processorChoice = await this.mainChoice(processorSection);
+      const processor = processorChoice ? await this.existingSelection(processorChoice.id) : null;
+      await this.open(memorySection);
+      const memoryChoice = await this.mainChoice(memorySection);
+      const memory = memoryChoice ? await this.existingSelection(memoryChoice.id) : null;
+      if (!processor || !memory || !memoryChoice) return false;
+      const allowed = allowedFor(processor.productNumber);
+      const total = dimmTotalFor(memory.quantity, processor.quantity, allowed);
+      if (total === null || total === memory.quantity) continue;
+      console.log(`[STEP] OCA rule "${rule.ownText}": ${processor.quantity} x ${processor.productNumber} allow ${allowed.join(', ')} `
+        + `DIMMs per CPU; setting ${memory.productNumber} from ${memory.quantity} to ${total}`);
+      const row = this.page.locator(`[id=${JSON.stringify(memory.rowId)}]`);
+      const set = await this.quantities.set(row, memory.productNumber, total, false, { acceptOffered: true });
+      await this.enforceQuantityRule(memoryChoice.id, row, memory.productNumber, set);
+      return true;
+    }
+    return false;
+  }
+
   private async repairMaxRule(choice: MenuChoice): Promise<boolean> {
     for (const rule of await this.choiceRules(choice.id)) {
       const match = rule.ownText.match(/\bMax\s*=\s*(\d+)\s+(.+?)\s+(?:is|are)\s+allowed\b/i);
@@ -1354,6 +1423,9 @@ export class ComponentEngine {
     const flagged = await this.flaggedChoices(section);
     for (const choice of flagged) {
       if (await this.repairMaxRule(choice)) return;
+    }
+    for (const choice of flagged) {
+      if (await this.repairDimmPerCpuRule(choice)) return;
     }
     for (const choice of flagged) {
       if (await this.repairRequiredKindRule(choice)) return;
