@@ -27,7 +27,7 @@ export type ConfigurationSource = DetailedConfigurationSource | ReferenceConfigu
  * - Alletra 5000: HPE Alletra 5000 arrays, searched by "alletra" and built in the "Alletra5000Sol" — Wizard, tab by
  *   tab (Array Selection, Base Array Components); the array has no Processor or Memory dropdown (2026-10-22).
  */
-export const MODEL_TYPES = ['Server', 'Solution', 'Storage', 'Nutanix', 'Arcus EMEA', 'Simplivity Wizard', 'Alletra 4000', 'Alletra 5000'] as const;
+export const MODEL_TYPES = ['Server', 'Solution', 'Storage', 'Nutanix', 'Arcus EMEA', 'Simplivity Wizard', 'Alletra 4000', 'Alletra 5000', 'Synergy Frame'] as const;
 export type ModelType = (typeof MODEL_TYPES)[number];
 
 /** What a preset Model Type fills in when the Excel cell is blank. */
@@ -37,6 +37,12 @@ export interface ModelPreset {
   /** Text the search result to open must contain. */
   description?: string;
   country?: string;
+  /**
+   * A multi-frame solution (HPE Synergy 2/3/4 Frame): frame 1 gets a Configure-to-order server, every other
+   * frame the same server with the same Processor, Memory and Drive Cage. The Model Description picks the
+   * frame count, as several solutions share one part number.
+   */
+  frames?: boolean;
 }
 
 /** Customer Account a Nutanix model is configured under, and the text its search result contains. */
@@ -48,7 +54,13 @@ export const MODEL_PRESETS: Partial<Record<ModelType, ModelPreset>> = {
   'Arcus EMEA': { route: 'Solution', description: 'HPE GreenLake for PC3000 with Alletra Storage MP (Block)', country: 'SAUDI ARABIA' },
   'Alletra 4000': { route: 'Solution', description: 'HPE Alletra Storage Servers' },
   'Alletra 5000': { route: 'Solution', description: 'HPE Alletra 5000' },
+  'Synergy Frame': { route: 'Server', frames: true },
 };
+
+/** True for a multi-frame solution: the same server in every frame (Model Type Synergy Frame). */
+export function isFrameSolution(job: Pick<OcaJob, 'modelType'>): boolean {
+  return presetOf(job.modelType)?.frames === true;
+}
 
 const presetOf = (modelType: string | undefined): ModelPreset | undefined =>
   modelType ? MODEL_PRESETS[modelType as ModelType] : undefined;

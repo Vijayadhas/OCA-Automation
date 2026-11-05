@@ -15,6 +15,28 @@ export interface ModelSearchRequest {
   integrationRackPartNumber?: string;
 }
 
+const squash = (text: string) => text.replace(/\s+/g, ' ').trim();
+
+/** The description as a pattern that ignores letter case and the amount of spacing ("TAA   3 Frame"). */
+export function descriptionPattern(description: string): RegExp {
+  return new RegExp(squash(description).split(' ').map(escapeRegex).join('\\s+'), 'i');
+}
+
+/**
+ * The search result for an Excel Model Description: the one whose text, without the model number, is the
+ * description; else the first that contains it. -1 when none does. "HPE Synergy 3 Frame Solution" picks that
+ * result, not "HPE Synergy TAA 3 Frame Solution" or "HPE Synergy 3 Frame with HC Fan Solution".
+ */
+export function pickDescribedOption(texts: string[], modelNumber: string, description: string): number {
+  const wanted = squash(description).toLowerCase();
+  const withoutModel = (text: string) => squash(text.replace(new RegExp(`\\b${escapeRegex(modelNumber)}\\b`, 'gi'), ' '))
+    .replace(/^[\s:\-–]+|[\s:\-–]+$/g, '').toLowerCase();
+  const exact = texts.findIndex((text) => withoutModel(text) === wanted);
+  if (exact >= 0) return exact;
+  const pattern = descriptionPattern(description);
+  return texts.findIndex((text) => pattern.test(squash(text)));
+}
+
 export class ModelSearch {
   constructor(private readonly context: BrowserContext) {}
 
@@ -69,7 +91,7 @@ export class ModelSearch {
     const { modelNumber, description, isSolution } = request;
     // A search word ("Private" for the Arcus solution, 2026-10-20) lists entries that need not contain it
     // ("S3V83A HPE GreenLake for PC3000 with Alletra Storage MP (Block) Wizard"); the description finds those.
-    const modelPattern = new RegExp(`\\b${escapeRegex(modelNumber)}\\b${description ? `|${escapeRegex(description)}` : ''}`, 'i');
+    const modelPattern = new RegExp(`\\b${escapeRegex(modelNumber)}\\b${description ? `|${descriptionPattern(description).source}` : ''}`, 'i');
     const options = page.locator('ul.ui-autocomplete:not([style*="display: none"]) li.ui-menu-item, [role="option"]')
       .filter({ hasText: modelPattern }).filter({ visible: true });
     let outcome = '';
@@ -87,10 +109,12 @@ export class ModelSearch {
     console.log(`[INFO] ${modelNumber} matching search dropdown options (${optionTexts.length}): ${optionTexts.join(' || ')}`);
 
     if (description) {
-      const described = options.filter({ hasText: new RegExp(escapeRegex(description), 'i') }).first();
-      if (await described.isVisible().catch(() => false)) {
+      // Several results can share a part number (P06011-B21: HPE Synergy 2, 3 and 4 Frame Solution).
+      const allTexts = await options.evaluateAll((nodes) => nodes.map((node) => node.textContent ?? ''));
+      const index = pickDescribedOption(allTexts, modelNumber, description);
+      if (index >= 0) {
         console.log(`[STEP] Selecting ${modelNumber} search result matching Excel Model Description: ${description}`);
-        return described;
+        return options.nth(index);
       }
       throw new Error(`No ${modelNumber} search dropdown option matched Excel Model Description '${description}'`);
     }

@@ -80,6 +80,9 @@ export function buildInputTemplate(): XLSX.WorkBook {
     // HPE GreenLake for File storage (2026-10-28 recording) and a server offering only 400W-600W processors (2026-10-28 run).
     model('JOB-019', 'S1F24A', 'Storage', 'HPE GreenLake for File ("razercrestsol" CTO): Cloud Connectivity, Site Survey, Capacity. New; test.'),
     model('JOB-020', 'P97048-B21', 'Server', 'DL585a Gen13: every processor over 270W; the lowest power is taken. Retest.'),
+    // HPE Synergy frame solutions share part numbers (P06011-B21: 2, 3 or 4 Frame); the description picks one (2026-11-05 recording).
+    ['JOB-021', 'P06011-B21', 'Synergy Frame', 'HPE Synergy 3 Frame Solution', '', '', 'Random', '', '', '', 'Yes', 'Yes',
+      'Synergy 3 Frame: a server in frame 1, the same server, Processor, Memory and Drive Cage in frames 2 and 3. New; test.'],
   ];
   // No component rows: every model gets random Processor, Memory, Smart Chassis and Power Supplies.
   const components: unknown[][] = [];

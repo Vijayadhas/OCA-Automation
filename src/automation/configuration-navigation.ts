@@ -56,7 +56,8 @@ export class ConfigurationNavigation {
    * The Solution Wizard names the server it added "(P53921-B21#GTA) HPE DL385 Gen11 8SFF CTO Svr".
    */
   async entriesForPart(partNumber: string): Promise<NavigationEntry[]> {
-    const pattern = new RegExp(`\\|${escapeRegex(partNumber)}_\\d+$`, 'i');
+    // A key may carry an option code after the part number ("P53921-B21#GTA_57").
+    const pattern = new RegExp(`\\|${escapeRegex(partNumber)}(?:#[^|_]*)?_\\d+$`, 'i');
     const all = await this.entries();
     // Kept for checking OCA's tree on the next run.
     await this.snapshot?.('Solution full navigation');

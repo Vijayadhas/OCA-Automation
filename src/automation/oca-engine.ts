@@ -1,6 +1,6 @@
 import { resolveConfigurationErrors, type ResolveOptions } from './configuration-errors';
 import { expect, type BrowserContext, type Page } from '@playwright/test';
-import { countryFor, customerAccountFor, searchDescriptionFor, type OcaJob } from '../models/job';
+import { countryFor, customerAccountFor, isFrameSolution, searchDescriptionFor, type OcaJob } from '../models/job';
 import { CustomerAccount } from './customer-account';
 import { Country } from './country';
 import type { AutomationResult } from '../models/automation-result';
@@ -46,6 +46,20 @@ export async function recoverRequiredMenuSelections(
  */
 const MANDATORY_SECTIONS = ['Processor', 'Memory'];
 const MANDATORY_ONLY: ResolveOptions = { mandatorySections: MANDATORY_SECTIONS };
+
+/** A frame of a multi-frame solution in OCA's navigation ("Addons for Synergy Master 2 Frame #1"). */
+const FRAME = /\bframe\b/i;
+
+/**
+ * The components set on frame 1's server, as instructions that set the same products and quantities on
+ * another frame's server. A component left to OCA (default, configuration text) is kept as it was.
+ */
+export function copyOfSelections(executed: ComponentInstruction[]): ComponentInstruction[] {
+  return executed.map((instruction) => instruction.productNumber && instruction.quantity != null
+    && ['random', 'quantity', 'radio', 'automatic'].includes(instruction.selectionType)
+    ? { ...instruction, selectionType: 'quantity' as const }
+    : { ...instruction });
+}
 
 export class OcaEngine {
   private page?: Page;
@@ -134,6 +148,8 @@ export class OcaEngine {
         const servers = await this.configureSolutionServers(job, instructions, serverModel.text);
         result.selectedComponents += `${result.selectedComponents ? '; ' : ''}${servers}`;
       }
+    } else if (isFrameSolution(job)) {
+      result.selectedComponents = await this.configureFrameSolution(job, instructions);
     } else {
       result.selectedComponents = await this.configureMenuComponents(job, instructions);
     }
@@ -189,8 +205,9 @@ export class OcaEngine {
    * Sets the Menu components of the configuration on screen (a server, or a server inside a
    * solution) and returns the summary for Selected Components.
    */
-  private async configureMenuComponents(job: OcaJob, instructions: ComponentInstruction[]): Promise<string> {
-    const executedInstructions: ComponentInstruction[] = [];
+  private async configureMenuComponents(
+    job: OcaJob, instructions: ComponentInstruction[], executedInstructions: ComponentInstruction[] = [],
+  ): Promise<string> {
     // Components that could not be set as asked, reported with the results.
     const substitutions: string[] = [];
     this.currentStep = 'Load Menu sections';
@@ -220,6 +237,113 @@ export class OcaEngine {
       `${item.productNumber ?? item.configurationText ?? item.section}${item.quantity == null ? '' : ` x${item.quantity}`}`).join('; ');
     if (substitutions.length) summary += `; Changed: ${substitutions.join('; ')}`;
     return summary;
+  }
+
+  /**
+   * A multi-frame solution (HPE Synergy 2/3/4 Frame Solution, 2026-11-05 recording): each frame is a
+   * configuration whose Menu offers servers (Configure-to-order compute modules); a server added there
+   * becomes its own configuration, listed in OCA's navigation ("Synergy 480 Gen12 #1"), where its
+   * Processor, Memory and Drive Cage are set. Frame 1 is the solution itself: it gets the Excel Server
+   * (else a random Configure-to-order product) with random or Excel components. Every other frame in
+   * the navigation (its name says Frame) gets the same server, with the same products and quantities.
+   */
+  private async configureFrameSolution(job: OcaJob, instructions: ComponentInstruction[]): Promise<string> {
+    const navigation = new ConfigurationNavigation(this.activePage, (label) => this.snapshot(label));
+    const solutionLevel = await navigation.currentLevel();
+    this.currentStep = 'Load Menu sections';
+    await this.measure('Load Menu sections', () => this.components.ensureMenuLoaded());
+    this.currentStep = 'Show all component products';
+    await this.measure('Show all component products', () => this.components.showAllProducts());
+    this.currentStep = `Add a server to ${solutionLevel || 'frame 1'}`;
+    const server = await this.measure(this.currentStep, () => this.components.addConfigureToOrderProduct(job.server));
+    await this.options.html?.step(this.activePage, 'Frame 1 server added');
+
+    // Each server's own configuration, once configured, is not configured again.
+    const configured = new Set<string>();
+    const newServers = async () => (await navigation.entriesForPart(server.productNumber)).filter((entry) => !configured.has(entry.key));
+    // Frame 1's server: Excel components or random picks, plus a Drive Cage, as recorded.
+    const firstInstructions = instructions.map((instruction) => ({ ...instruction }));
+    if (!firstInstructions.some((instruction) => /^drive cage$/i.test(instruction.section.trim()))) {
+      const sequence = Math.max(0, ...firstInstructions.map((instruction) => instruction.sequence)) + 10;
+      firstInstructions.push({ jobId: job.jobId, section: 'Drive Cage', selectionType: 'random', sequence });
+    }
+    // Asserted so TypeScript keeps the union: it is assigned inside configureServers.
+    let copy = null as ComponentInstruction[] | null;
+    const summaries: string[] = [`${solutionLevel || 'Frame 1'}: ${server.productNumber} x${server.quantity}`];
+    const configureServers = async (frame: string) => {
+      this.currentStep = `Find the server added to ${frame}`;
+      const entries = await this.measure(this.currentStep, () => newServers());
+      if (!entries.length) {
+        throw new MandatorySelectionError(`Server ${server.productNumber} was added to ${frame}, but its configuration was not found in OCA's `
+          + 'navigation; Processor and Memory could not be set and the configuration was not saved');
+      }
+      for (const entry of entries) {
+        this.currentStep = `Open ${entry.label}`;
+        await this.measure(this.currentStep, () => navigation.open(entry));
+        await this.showMenuTab();
+        const executed: ComponentInstruction[] = [];
+        const summary = await this.configureMenuComponents(job, (copy ?? firstInstructions).map((instruction) => ({ ...instruction })), executed);
+        this.currentStep = `Resolve required configuration errors in ${entry.label}`;
+        await this.measure(this.currentStep, () => resolveConfigurationErrors(this.activePage, this.components, MANDATORY_ONLY));
+        this.currentStep = `Check mandatory Processor and Memory in ${entry.label}`;
+        for (const section of MANDATORY_SECTIONS) await this.components.mandatorySelection(section);
+        configured.add(entry.key);
+        // Frame 1's picks, by product and quantity, are what every other frame's server gets.
+        copy ??= copyOfSelections(executed);
+        summaries.push(`${entry.label}: ${summary}`);
+      }
+    };
+    await configureServers(solutionLevel || 'frame 1');
+    this.currentStep = `Return to ${solutionLevel || 'the solution'}`;
+    await this.measure(this.currentStep, () => navigation.returnTo(solutionLevel));
+
+    this.currentStep = 'Find the other frames';
+    // OCA's tree keys are paths ("|…|frame|server_1"): frame 1 is every entry above its own server.
+    const frameOneServers = [...configured];
+    const frames = (await navigation.entries()).filter((entry) => FRAME.test(`${entry.label} ${entry.description}`)
+      && entry.label !== solutionLevel && !configured.has(entry.key)
+      && !frameOneServers.some((key) => entry.key && key.startsWith(`${entry.key}|`)));
+    console.log(`[STEP] Other frames (${frames.length}): ${frames.map((entry) => entry.label).join(', ') || 'none'}`);
+    if (copy) console.log(`[INFO] Each frame gets ${server.productNumber} x${server.quantity} with ${copy.map((item) =>
+      `${item.section} ${item.productNumber ?? item.configurationText ?? ''}${item.quantity == null ? '' : ` x${item.quantity}`}`).join(', ')}`);
+    for (const frame of frames) {
+      this.currentStep = `Open ${frame.label}`;
+      await this.measure(this.currentStep, () => navigation.open(frame));
+      if (await navigation.currentLevel() === solutionLevel) {
+        console.log(`[SKIP] ${frame.label} is the solution itself (frame 1)`);
+        continue;
+      }
+      await this.showMenuTab();
+      await this.components.ensureMenuLoaded();
+      if (!await this.components.findSection(server.sectionTitle)) {
+        console.log(`[SKIP] ${frame.label} offers no ${server.sectionTitle} section; no server added there`);
+        await navigation.returnTo(solutionLevel);
+        continue;
+      }
+      this.currentStep = `Add ${server.productNumber} to ${frame.label}`;
+      await this.measure(this.currentStep, () => this.components.addProductInSection(server.sectionTitle, server.productNumber, server.quantity));
+      summaries.push(`${frame.label}: ${server.productNumber} x${server.quantity}`);
+      await configureServers(frame.label);
+      this.currentStep = `Return to ${solutionLevel || 'the solution'}`;
+      await this.measure(this.currentStep, () => navigation.returnTo(solutionLevel));
+    }
+    await this.showMenuTab();
+    return summaries.join('; ');
+  }
+
+  /** Shows the Menu tab of the open configuration (a frame or server opened from the navigation can show Summary). */
+  private async showMenuTab(): Promise<void> {
+    const menu = this.activePage.locator('a[href="#extended_overview_menu"]').or(this.activePage.getByRole('link', { name: /^Menu$/i }))
+      .filter({ visible: true }).first();
+    if (!await menu.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      const components = this.activePage.getByRole('link', { name: /^Components$/i }).filter({ visible: true }).first();
+      if (!await components.isVisible({ timeout: 2_000 }).catch(() => false)) return;
+      await safeClick(components);
+      await waitForBlockingOverlay(this.activePage);
+      if (!await menu.isVisible({ timeout: 5_000 }).catch(() => false)) return;
+    }
+    await safeClick(menu);
+    await waitForBlockingOverlay(this.activePage);
   }
 
   /**

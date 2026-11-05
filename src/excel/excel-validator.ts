@@ -1,4 +1,4 @@
-import { MODEL_TYPES, type OcaJob } from '../models/job';
+import { MODEL_TYPES, isFrameSolution, type OcaJob } from '../models/job';
 import { isSelectionType, type ComponentInstruction } from '../models/component-instruction';
 
 export class InputValidationError extends Error {
@@ -19,6 +19,11 @@ export class ExcelValidator {
       if (job.isSolution && job.isStorage) issues.push(`Models row ${job.inputRow}: Solution and Storage cannot both be Yes`);
       if (job.modelType && !(MODEL_TYPES as readonly string[]).includes(job.modelType)) {
         issues.push(`Models row ${job.inputRow}: Model Type '${job.modelType}' is not one of ${MODEL_TYPES.join(', ')} (leave it blank to detect it)`);
+      }
+      // P06011-B21 is the 2, 3 and 4 Frame solution: only the description tells them apart.
+      if (isFrameSolution(job) && !job.modelDescription?.trim()) {
+        issues.push(`Models row ${job.inputRow}: Model Type ${job.modelType} needs a Model Description (e.g. HPE Synergy 3 Frame Solution); `
+          + 'several frame solutions share one part number');
       }
       // Job IDs name result rows and capture folders, so "JOB-001" and "job-001 " are the same ID.
       const id = (job.jobId ?? '').trim().toLowerCase();

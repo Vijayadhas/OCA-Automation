@@ -185,6 +185,9 @@ function isPickable(row: RowInfo): boolean {
     && !isMemoryBlankProduct(row.description) && (row.hasQuantity || row.hasRadio));
 }
 
+/** A product that is a configuration of its own: "HPE Synergy 480 Gen12 Configure-to-order Compute Module". */
+export const CONFIGURE_TO_ORDER = /\bconfigure[- ]to[- ]order\b|\bCTO\b/i;
+
 /** Drive kinds a storage model's Storage Devices section is filled with, in this order. */
 export const STORAGE_DRIVE_KINDS: RequiredKind[] = [
   { name: 'HDD', matches: (text) => /\bHDDs?\b|\bhard (?:disk )?drives?\b/i.test(text) },
@@ -515,6 +518,53 @@ export class ComponentEngine {
       picked.push({ ...selection, kind: kind.name });
     }
     return picked;
+  }
+
+  /**
+   * Frame of a multi-frame solution (HPE Synergy): adds one Configure-to-order product, the server that
+   * becomes its own configuration. Excel's Server (part number or description words) names it; else one
+   * random product whose description says Configure-to-order (or CTO) is taken from the Menu's sections.
+   */
+  async addConfigureToOrderProduct(requested?: string, quantity = 1): Promise<Selection & { sectionTitle: string }> {
+    const wanted = (requested ?? '').trim();
+    const candidates: Array<{ row: Locator; productNumber: string; description: string; choiceId: string; sectionTitle: string }> = [];
+    for (const section of (await this.sections()).filter((item) => item.visible)) {
+      await this.open(section);
+      for (const choice of (await this.choices(section)).filter((item) => item.rows > 0)) {
+        for (const row of (await this.rowInfo(this.choiceRows(choice.id))).filter(isPickable)) {
+          const matches = wanted
+            ? row.productNumber.toLowerCase() === wanted.toLowerCase() || mentionsProduct(row.description, wanted)
+              || normalize(row.description).includes(normalize(wanted))
+            : CONFIGURE_TO_ORDER.test(row.description);
+          if (matches) {
+            candidates.push({ row: this.page.locator(`[id=${JSON.stringify(row.id)}]`), productNumber: row.productNumber,
+              description: row.description, choiceId: choice.id, sectionTitle: section.title });
+          }
+        }
+      }
+    }
+    if (!candidates.length) {
+      throw new UnsupportedComponentError(wanted
+        ? `Server ${wanted} is not offered in this configuration's Menu`
+        : 'No Configure-to-order product is offered in this configuration\'s Menu');
+    }
+    console.log(`[INFO] Configure-to-order candidates (${candidates.length}): ${candidates.map((item) => `${item.productNumber} (${item.sectionTitle})`).join(', ')}`);
+    const label = wanted ? `Server ${wanted}` : 'Configure-to-order server';
+    const picked = await this.tryRandomCandidates(label, candidates, async (candidate) => {
+      const committed = await this.quantities.set(candidate.row, candidate.productNumber, quantity, false, { acceptOffered: true });
+      return { productNumber: candidate.productNumber, description: candidate.description, quantity: committed, sectionTitle: candidate.sectionTitle };
+    }, REPAIR_CANDIDATE_TRIES);
+    console.log(`[STEP] ${picked.sectionTitle}: ${picked.productNumber} x${picked.quantity} (${picked.description})`);
+    return picked;
+  }
+
+  /** Sets a product's quantity in the section titled so (the next frame gets the server frame 1 got). */
+  async addProductInSection(sectionTitle: string, productNumber: string, quantity: number): Promise<void> {
+    const section = await this.findSection(sectionTitle);
+    if (!section) throw new UnsupportedComponentError(`Section ${sectionTitle} is not offered in this configuration`);
+    await this.open(section);
+    await this.quantities.set(await this.findProductRow(productNumber), productNumber, quantity, false, { acceptOffered: true });
+    console.log(`[STEP] ${section.title}: ${productNumber} x${quantity}`);
   }
 
   async findProductRow(productNumber: string, description?: string): Promise<Locator> {

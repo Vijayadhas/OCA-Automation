@@ -49,7 +49,7 @@ test('the input template has every dialog field and reads back as runnable jobs'
   expect(XLSX.utils.sheet_to_json<string[]>(workbook.Sheets.Models, { header: 1 })[0]).toEqual([...TEMPLATE_MODEL_COLUMNS, 'Notes']);
 
   const jobs = new ExcelReader().read(file);
-  expect(jobs).toHaveLength(20);
+  expect(jobs).toHaveLength(21);
   expect(new Set(jobs.map((job) => job.jobId)).size).toBe(20);
   const byId = (jobId: string) => jobs.find((job) => job.jobId === jobId)!;
   expect([byId('JOB-010').modelNumber, byId('JOB-010').modelType, byId('JOB-010').isSolution]).toEqual(['P72176-B21', 'Nutanix', false]);
