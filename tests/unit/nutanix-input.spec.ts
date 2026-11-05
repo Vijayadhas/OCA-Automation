@@ -50,7 +50,7 @@ test('the input template has every dialog field and reads back as runnable jobs'
 
   const jobs = new ExcelReader().read(file);
   expect(jobs).toHaveLength(21);
-  expect(new Set(jobs.map((job) => job.jobId)).size).toBe(20);
+  expect(new Set(jobs.map((job) => job.jobId)).size).toBe(21);
   const byId = (jobId: string) => jobs.find((job) => job.jobId === jobId)!;
   expect([byId('JOB-010').modelNumber, byId('JOB-010').modelType, byId('JOB-010').isSolution]).toEqual(['P72176-B21', 'Nutanix', false]);
   expect([byId('JOB-011').modelNumber, byId('JOB-011').isSolution]).toEqual(['S3V83A', true]);
@@ -58,8 +58,9 @@ test('the input template has every dialog field and reads back as runnable jobs'
   expect([byId('JOB-017').modelNumber, byId('JOB-017').modelType, byId('JOB-017').isSolution]).toEqual(['4000', 'Alletra 4000', true]);
   expect([byId('JOB-018').modelNumber, byId('JOB-018').modelType, byId('JOB-018').isSolution]).toEqual(['alletra', 'Alletra 5000', true]);
   expect([byId('JOB-019').modelNumber, byId('JOB-019').modelType, byId('JOB-019').isStorage]).toEqual(['S1F24A', 'Storage', true]);
-  // Notes are for the team; they never become a search description (only JOB-013 has one in its own column).
-  expect(jobs.filter((job) => job.modelDescription !== undefined).map((job) => job.jobId)).toEqual(['JOB-013']);
+  // Notes are for the team; they never become a search description (only JOB-013 and JOB-021 have one in its own column).
+  expect(jobs.filter((job) => job.modelDescription !== undefined).map((job) => job.jobId)).toEqual(['JOB-013', 'JOB-021']);
+  expect([byId('JOB-021').modelType, byId('JOB-021').modelDescription, byId('JOB-021').isSolution]).toEqual(['Synergy Frame', 'HPE Synergy 3 Frame Solution', false]);
   const sections = (index: number) => {
     const source = jobs[index].source;
     return source.kind === 'detailed-excel' ? source.instructions.map((item) => item.section) : [];
