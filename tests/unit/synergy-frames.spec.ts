@@ -108,10 +108,12 @@ test('a server frame 1 already has is kept, not added again', async ({ page }) =
   expect(await quantity(page, 'P99998-B21')).toBe('0');
 });
 
-test('servers behind "Show more" are listed before one is picked', async ({ page }) => {
+// Show more as captured on P06011-B21 (2026-11-05): a label for the hidden checkbox #showmore_<choice id>.
+test('servers behind "Show more" are listed before one is picked, and the list is not folded again', async ({ page }) => {
   const hidden = frameMenu.replace('id="item_tr_P68217-B21_bladesSection_blades"', 'id="item_tr_P68217-B21_bladesSection_blades" style="display:none"');
-  await page.setContent(`${hidden}<span onclick="document.getElementById('item_tr_P68217-B21_bladesSection_blades').style.display = '';
-    this.textContent = 'Show less <<'">Show more >></span>`);
+  await page.setContent(`${hidden}<label for="showmore_bladesSection_blades" class="hpe-btn hpe-secondary view-btn">Show more &gt;&gt;</label>
+    <input type="checkbox" id="showmore_bladesSection_blades" style="display: none;"
+      onchange="document.getElementById('item_tr_P68217-B21_bladesSection_blades').style.display = this.checked ? '' : 'none'">`);
   expect((await new ComponentEngine(page).addConfigureToOrderProduct('P68217-B21')).productNumber).toBe('P68217-B21');
   expect(await quantity(page, 'P68217-B21')).toBe('1');
 });
@@ -133,4 +135,12 @@ test('Synergy Frame selects Lite unless the Service Type column names another', 
   expect(serviceTypeFor(job({ modelType: 'Synergy Frame', serviceType: '' }))).toBe('Lite');
   expect(serviceTypeFor(job({ modelType: 'Synergy Frame', serviceType: 'Standard' }))).toBe('Standard');
   expect(serviceTypeFor(job({ modelType: 'Server', serviceType: 'Random' }))).toBe('Random');
+});
+
+test('"Show more" is clicked only while its list is folded', async ({ page }) => {
+  await page.setContent(`<label for="showmore_a">Show more &gt;&gt;</label><input type="checkbox" id="showmore_a" style="display:none">
+    <label for="showmore_b">Show more &gt;&gt;</label><input type="checkbox" id="showmore_b" style="display:none" checked>`);
+  await new ComponentEngine(page).showMoreRows();
+  await expect(page.locator('#showmore_a')).toBeChecked();
+  await expect(page.locator('#showmore_b')).toBeChecked();
 });

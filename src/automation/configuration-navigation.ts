@@ -98,6 +98,21 @@ export class ConfigurationNavigation {
   }
 
   /**
+   * Opens the top level (the first breadcrumb entry, li#eo_nav_li_0: "OCA Config 2"). A Synergy frame
+   * solution opens inside frame 1 ("OCA Config 2 > Addons for Synergy 2 Frame #1 Group > Addons for Synergy
+   * Master 1 Frame #1", 2026-11-05 capture); its Services and BOM were set at the top in the recordings.
+   */
+  async openTop(): Promise<void> {
+    const top = this.page.locator('li.eo_nav_li').first();
+    const name = clean(await top.innerText({ timeout: 10_000 }).catch(() => ''));
+    if (!name || await this.currentLevel() === name) return;
+    console.log(`[STEP] Opening the top level, ${name}`);
+    await top.click({ force: true }).catch(() => top.evaluate((element) => (element as HTMLElement).click()));
+    await waitForBlockingOverlay(this.page);
+    await expect.poll(() => this.currentLevel(), { timeout: 60_000, message: `Open ${name}` }).toBe(name);
+  }
+
+  /**
    * Opens a level again (the solution after its servers): by its breadcrumb entry, else by its entry in
    * the navigation tree, else one level up. On S3V83A the server sat under "Virtual Rack Service #1",
    * a sibling of the solution, so going up opened the rack, not the solution (2026-10-18).

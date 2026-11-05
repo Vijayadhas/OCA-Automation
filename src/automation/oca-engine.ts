@@ -8,7 +8,7 @@ import { createPendingResult } from '../models/automation-result';
 import { waitForBlockingOverlay } from '../core/waits';
 import { safeClick } from '../core/interactions';
 import { ModelSearch } from './model-search';
-import { ComponentEngine, type ExecutionOutcome } from './component-engine';
+import { CONFIGURE_TO_ORDER, ComponentEngine, type ExecutionOutcome } from './component-engine';
 import { isBrowserClosedError, MandatorySelectionError } from '../core/errors';
 import { ConfigurationNavigation, partOfKey } from './configuration-navigation';
 import { getErrorMessage } from '../core/excel';
@@ -120,6 +120,7 @@ export class OcaEngine {
     const instructions = job.source.instructions.map((instruction) => ({ ...instruction }));
     const useSolutionWizard = await this.shouldUseSolutionWizard(job);
     const useStorageFlow = job.isStorage && await this.shouldUseStorageFlow(job);
+    let frameSolution = false;
     if (useStorageFlow) {
       // As recorded for S1F24A (2026-10-28): all products are shown before Capacity is picked.
       this.currentStep = 'Show all component products';
@@ -148,7 +149,8 @@ export class OcaEngine {
         const servers = await this.configureSolutionServers(job, instructions, serverModel.text);
         result.selectedComponents += `${result.selectedComponents ? '; ' : ''}${servers}`;
       }
-    } else if (isFrameSolution(job)) {
+    } else if (isFrameSolution(job) || await this.looksLikeFrameSolution(job)) {
+      frameSolution = true;
       result.selectedComponents = await this.configureFrameSolution(job, instructions);
     } else {
       result.selectedComponents = await this.configureMenuComponents(job, instructions);
@@ -164,7 +166,7 @@ export class OcaEngine {
       for (const section of MANDATORY_SECTIONS) await this.components.mandatorySelection(section);
     }
     this.currentStep = 'Select Support Services';
-    const support = await this.measure('Select Support Services', () => new SupportServices(this.activePage).select(serviceTypeFor(job)));
+    const support = await this.measure('Select Support Services', () => new SupportServices(this.activePage).select(serviceTypeFor(frameSolution ? { ...job, modelType: job.modelType || 'Synergy Frame' } : job)));
     result.serviceExperience = support.serviceExperience;
     result.serviceTerm = support.term;
     result.dataPrivacy = support.dataPrivacy;
@@ -260,7 +262,14 @@ export class OcaEngine {
 
     // Each server's own configuration, once configured, is not configured again.
     const configured = new Set<string>();
-    const newServers = async () => (await navigation.entriesForPart(server.productNumber)).filter((entry) => !configured.has(entry.key));
+    // By the part number in OCA's tree key; else by the server's description, which the tree shows in brackets.
+    const newServers = async () => {
+      const byPart = (await navigation.entriesForPart(server.productNumber)).filter((entry) => !configured.has(entry.key));
+      if (byPart.length) return byPart;
+      const wanted = server.description.replace(/\s+/g, ' ').trim().toLowerCase();
+      return (await navigation.entries()).filter((entry) => !configured.has(entry.key) && wanted
+        && entry.description.replace(/\s+/g, ' ').toLowerCase().includes(wanted));
+    };
     // Frame 1's server: Excel components or random picks, plus a Drive Cage, as recorded.
     const firstInstructions = instructions.map((instruction) => ({ ...instruction }));
     if (!firstInstructions.some((instruction) => /^drive cage$/i.test(instruction.section.trim()))) {
@@ -330,8 +339,28 @@ export class OcaEngine {
       this.currentStep = `Return to ${solutionLevel || 'the solution'}`;
       await this.measure(this.currentStep, () => navigation.returnTo(solutionLevel));
     }
+    // Services and BOM at the top level, as recorded (frame 1 is one level below it).
+    this.currentStep = 'Open the top level';
+    await this.measure(this.currentStep, () => navigation.openTop());
     await this.showMenuTab();
     return summaries.join('; ');
+  }
+
+  /**
+   * Model Type left blank (run of 2026-11-05: "HPE Synergy 2 Frame Solution" then went the Server route and
+   * failed at Billing Tier with no servers added). A frame solution is recognised when its Menu has no
+   * Processor section, offers Configure-to-order products, and the description or the open level says Frame.
+   */
+  private async looksLikeFrameSolution(job: OcaJob): Promise<boolean> {
+    if (job.modelType) return false;
+    const level = await new ConfigurationNavigation(this.activePage).currentLevel();
+    if (!FRAME.test(`${searchDescriptionFor(job) ?? ''} ${level}`)) return false;
+    if (await this.components.findSection('Processor').catch(() => null)) return false;
+    const descriptions = await this.activePage.locator('tr.item_tr .item_desc').allTextContents().catch(() => [] as string[]);
+    if (!descriptions.some((text) => CONFIGURE_TO_ORDER.test(text))) return false;
+    console.log(`[INFO] Model Type is blank, but ${job.modelNumber} (${level}) is a frame solution: no Processor section, `
+      + 'Configure-to-order servers offered; using the Synergy Frame route (set Model Type to Synergy Frame)');
+    return true;
   }
 
   /** Shows the Menu tab of the open configuration (a frame or server opened from the navigation can show Summary). */

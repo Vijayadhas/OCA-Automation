@@ -584,13 +584,22 @@ export class ComponentEngine {
     return picked;
   }
 
-  /** Clicks OCA's "Show more" links so rows it hides are listed (4-frame recording: "Show more >>"). */
-  private async showMoreRows(): Promise<void> {
-    for (let click = 0; click < 10; click += 1) {
-      const more = this.page.getByText(/^\s*Show more\b/i).filter({ visible: true }).first();
-      if (!await more.isVisible().catch(() => false)) return;
-      console.log('[STEP] Showing more products ("Show more")');
-      await more.click({ force: true });
+  /**
+   * Shows the rows OCA hides behind "Show more >>". Captured on P06011-B21 (2026-11-05): each choice has
+   * <label for="showmore_<choice id>">Show more &gt;&gt;</label> and a hidden checkbox #showmore_<choice id>;
+   * rows after the one marked last-visible stay hidden until it is ticked. Each shown label is clicked once,
+   * only while its checkbox is not ticked, so a shown list is never folded again.
+   */
+  async showMoreRows(): Promise<void> {
+    const labels = this.page.locator('label[for^="showmore_"]').filter({ visible: true });
+    for (let index = 0; index < await labels.count(); index += 1) {
+      const label = labels.nth(index);
+      const id = await label.getAttribute('for').catch(() => null);
+      if (!id) continue;
+      const box = this.page.locator(`[id=${JSON.stringify(id)}]`).first();
+      if (await box.count() && await box.isChecked().catch(() => false)) continue;
+      console.log(`[STEP] Showing more products (${id.slice('showmore_'.length)})`);
+      await label.click({ force: true });
       await waitForBlockingOverlay(this.page);
     }
   }
