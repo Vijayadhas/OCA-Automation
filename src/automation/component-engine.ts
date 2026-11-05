@@ -655,9 +655,12 @@ export class ComponentEngine {
   private async rowInfo(rows: Locator): Promise<RowInfo[]> {
     return rows.evaluateAll((elements) => elements.map((row) => {
       const radio = row.querySelector('input[type="radio"]') as HTMLInputElement | null;
-      const select = row.querySelector('td.item_qty select') as HTMLSelectElement | null;
-      const input = row.querySelector('td.item_qty input[type="number"], td.item_qty input[type="text"]') as HTMLInputElement | null;
-      const display = row.querySelector('td.item_qty .item_qty_div');
+      // The quantity cell is td.item_qty; on HPE Synergy frames (P06011-B21, 2026-11-05) it is td.item_qty_quoted,
+      // followed by td.item_qty_dnq, which is not the ordered quantity.
+      const select = row.querySelector('td.item_qty select, td.item_qty_quoted select') as HTMLSelectElement | null;
+      const input = row.querySelector('td.item_qty input[type="number"], td.item_qty input[type="text"], '
+        + 'td.item_qty_quoted input[type="number"], td.item_qty_quoted input[type="text"]') as HTMLInputElement | null;
+      const display = row.querySelector('td.item_qty .item_qty_div, td.item_qty_quoted .item_qty_div');
       // Read only the committed quantity, never hidden menu digits elsewhere in the cell.
       const quantity = select ? (select.selectedOptions[0]?.textContent ?? select.value)
         : input ? input.value : (display?.textContent ?? '');

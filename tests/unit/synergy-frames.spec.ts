@@ -144,3 +144,17 @@ test('"Show more" is clicked only while its list is folded', async ({ page }) =>
   await expect(page.locator('#showmore_a')).toBeChecked();
   await expect(page.locator('#showmore_b')).toBeChecked();
 });
+
+// Row markup captured on P06011-B21 (HPE Synergy 3 Frame, run of 2026-11-05): the quantity is in td.item_qty_quoted,
+// with td.item_qty_dnq beside it, not td.item_qty. Such rows were not seen as pickable ("No Configure-to-order
+// product is offered").
+test('a server whose quantity is in td.item_qty_quoted is picked and set there', async ({ page }) => {
+  const quoted = frameMenu.replace(/<td class="item_qty">(.*?)<\/td><\/tr>/gs,
+    '<td class="item_qty_quoted ">$1</td><td class="item_qty_dnq "><div class="item_qty_div">0</div></td></tr>');
+  expect(quoted).toContain('item_qty_quoted');
+  await page.setContent(quoted);
+  const server = await new ComponentEngine(page).addConfigureToOrderProduct();
+  expect(server).toMatchObject({ productNumber: 'P68217-B21', quantity: 1 });
+  await expect(page.locator('#item_tr_P68217-B21_bladesSection_blades td.item_qty_quoted .item_qty_div')).toHaveText('1');
+  await expect(page.locator('#item_tr_P68217-B21_bladesSection_blades td.item_qty_dnq .item_qty_div')).toHaveText('0');
+});
