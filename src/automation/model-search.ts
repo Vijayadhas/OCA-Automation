@@ -37,6 +37,29 @@ export function pickDescribedOption(texts: string[], modelNumber: string, descri
   return texts.findIndex((text) => pattern.test(squash(text)));
 }
 
+/**
+ * The search result to open when Excel gives no Model Description. P53921-B21 (run 995c5037, 2026-11-05) lists 8:
+ * "vSAN ESA AF-2 - HPE DL385 Gen11 8SFF CTO Svr (P53921-B21)" bundles first, then "HPE ProLiant DL385 Gen11 8SFF
+ * Configure-to-order Server", and #GTA copies. The first, a vSAN bundle, brought vSAN processor rules. The plain
+ * server wins: the exact part number (not "#GTA"), a description that does not repeat the part number in brackets
+ * (bundles do), and the words Configure-to-order; a Wizard result never. Ties keep OCA's order. -1 when none is left.
+ */
+export function pickDefaultOption(texts: string[], modelNumber: string): number {
+  const model = escapeRegex(modelNumber.trim());
+  let best = -1;
+  let bestScore = Number.NEGATIVE_INFINITY;
+  texts.forEach((raw, index) => {
+    const text = squash(raw);
+    if (/Solution\s*Wizard|Wizard/i.test(text)) return;
+    let score = 0;
+    if (new RegExp(`^${model}(?![#\\w-])`, 'i').test(text)) score += 4;
+    if (new RegExp(`\\(\\s*${model}\\s*\\)`, 'i').test(text)) score -= 3;
+    if (/\bconfigure[- ]to[- ]order\b/i.test(text)) score += 2;
+    if (score > bestScore) { best = index; bestScore = score; }
+  });
+  return best;
+}
+
 export class ModelSearch {
   constructor(private readonly context: BrowserContext) {}
 
@@ -125,8 +148,12 @@ export class ModelSearch {
         return wizard;
       }
     } else {
-      const normal = options.filter({ hasNotText: /Solution\s*Wizard|Wizard/i }).first();
-      if (await normal.isVisible().catch(() => false)) return normal;
+      const texts = await options.evaluateAll((nodes) => nodes.map((node) => node.textContent ?? ''));
+      const index = pickDefaultOption(texts, modelNumber);
+      if (index >= 0) {
+        console.log(`[STEP] Selecting the plain configure-to-order result for ${modelNumber}: ${squash(texts[index])}`);
+        return options.nth(index);
+      }
     }
     console.log(`[STEP] Selecting default search result for ${modelNumber}`);
     return options.first();

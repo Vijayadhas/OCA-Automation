@@ -200,6 +200,18 @@ export function newestGeneration<T extends { description: string }>(candidates: 
 }
 
 /**
+ * What an OCA processor-count rule asks for: "Second processor must be selected" (also "2nd Processor must be
+ * selected") -> 2 processors; "Total Processor Core Count … must total 24 cores or higher" -> 24 cores. null otherwise.
+ */
+export function processorCountNeed(text: string): { processors?: number; cores?: number } | null {
+  const clean = text.replace(/\s+/g, ' ');
+  const second = /\b(?:second|2nd) processor must be selected\b/i.test(clean);
+  const cores = Number(/core count\b.*?\bmust total (\d+) cores\b/i.exec(clean)?.[1] ?? 0);
+  if (!second && !cores) return null;
+  return { ...(second ? { processors: 2 } : {}), ...(cores ? { cores } : {}) };
+}
+
+/**
  * OCA's "DIMM qty per CPU" rule as a function of the selected processor, giving the allowed DIMMs per CPU
  * (above 0); null when the text is not such a rule. Conditional form: "If any of these processors (A, B) is
  * selected, Then the following DIMM qty per CPU are allowed 0, 1, 2, 4, 8 Else, for all other processor SKUs,
@@ -985,6 +997,33 @@ export class ComponentEngine {
     return false;
   }
 
+  /**
+   * OCA rules on the processor count (P53921-B21 vSAN ESA AF-2 bundle, 2026-11-05): "Second processor must be
+   * selected" and "The Total Processor Core Count for this vSAN solution must total 24 cores or higher". The
+   * Processor repair only kept the single processor. The processor's quantity is raised to what the rules ask
+   * (cores read from its description, "16-core"), or the nearest OCA offers.
+   */
+  private async repairProcessorCountRule(choice: MenuChoice): Promise<boolean> {
+    const needs = (await this.choiceRules(choice.id)).map((rule) => processorCountNeed(rule.ownText)).filter((need) => need !== null);
+    if (!needs.length) return false;
+    const section = await this.findSection('Processor');
+    if (!section) return false;
+    await this.open(section);
+    const main = await this.mainChoice(section);
+    const processor = main ? await this.existingSelection(main.id) : null;
+    if (!processor || !main) return false;
+    const cores = Number(/(\d+)[- ]core/i.exec(processor.description)?.[1] ?? 0);
+    const target = Math.max(processor.quantity, ...needs.map((need) => Math.max(need!.processors ?? 0,
+      need!.cores && cores ? Math.ceil(need!.cores / cores) : 0)));
+    if (target <= processor.quantity) return false;
+    console.log(`[STEP] OCA rule${needs.length > 1 ? 's' : ''} need ${target} processors (${processor.productNumber}`
+      + `${cores ? `, ${cores} cores each` : ''}); setting ${processor.quantity} to ${target}`);
+    const row = this.page.locator(`[id=${JSON.stringify(processor.rowId)}]`);
+    const set = await this.quantities.set(row, processor.productNumber, target, false, { acceptOffered: true });
+    await this.enforceQuantityRule(main.id, row, processor.productNumber, set);
+    return true;
+  }
+
   private async repairMaxRule(choice: MenuChoice): Promise<boolean> {
     for (const rule of await this.choiceRules(choice.id)) {
       const match = rule.ownText.match(/\bMax\s*=\s*(\d+)\s+(.+?)\s+(?:is|are)\s+allowed\b/i);
@@ -1426,6 +1465,9 @@ export class ComponentEngine {
     }
     for (const choice of flagged) {
       if (await this.repairDimmPerCpuRule(choice)) return;
+    }
+    for (const choice of flagged) {
+      if (await this.repairProcessorCountRule(choice)) return;
     }
     for (const choice of flagged) {
       if (await this.repairRequiredKindRule(choice)) return;
