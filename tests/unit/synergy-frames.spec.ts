@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { pickDescribedOption } from '../../src/automation/model-search';
 import { ComponentEngine, generationOf, newestGeneration } from '../../src/automation/component-engine';
 import { partOfKey } from '../../src/automation/configuration-navigation';
-import { copyOfSelections } from '../../src/automation/oca-engine';
+import { copyOfSelections, otherFrames } from '../../src/automation/oca-engine';
 import { ExcelValidator } from '../../src/excel/excel-validator';
 import { isFrameSolution, serviceTypeFor, type OcaJob } from '../../src/models/job';
 import { prepareRunJobs } from '../../src/app/run-workbook';
@@ -157,4 +157,41 @@ test('a server whose quantity is in td.item_qty_quoted is picked and set there',
   expect(server).toMatchObject({ productNumber: 'P68217-B21', quantity: 1 });
   await expect(page.locator('#item_tr_P68217-B21_bladesSection_blades td.item_qty_quoted .item_qty_div')).toHaveText('1');
   await expect(page.locator('#item_tr_P68217-B21_bladesSection_blades td.item_qty_dnq .item_qty_div')).toHaveText('0');
+});
+
+// OCA's navigation tree of P06011-B21, HPE Synergy 4 Frame Solution (run fb6e0b0d, 2026-11-05), after frame 1's server.
+const tree4 = [
+  ['root', 'OCA Config 2', '(HPE Synergy 4 Frame Solution)'],
+  ['|G|instance_2_GROUP', 'Addons for Synergy 4 Frame #1 Group', '(HPE Synergy 4 Frame Solution)'],
+  ['|G|instance_2_GROUP|P06011-B21_1', 'Addons for Synergy Master 1 Frame #1', '(HPE Synergy 12000 Configure-to-order Frame with 10x Fans)'],
+  ['|G|instance_2_GROUP|P06011-B21_1|P68217-B21_1', 'Synergy 480 Gen12 #1', '(HPE Synergy 480 Gen12 Configure-to-order Compute Module)'],
+  ['|G|instance_2_GROUP|P06011-B21_1|876852-B21_1', '4-port Frame Link Module #1', '(HPE Synergy 4-port Frame Link Module)'],
+  ['|G|instance_2_GROUP|P06011-B21_1|867796-B21_1', '100Gb Virtual #1', '(HPE Virtual Connect SE 100Gb F32 Module for Synergy)'],
+  ['|G|instance_2_GROUP|P06011-B21_5', 'Addons for Synergy Master 2 Frame #1', '(HPE Synergy 12000 Configure-to-order Frame with 10x Fans)'],
+  ['|G|instance_2_GROUP|P06011-B21_5|876852-B21_1', '4-port Frame Link Module #3', '(HPE Synergy 4-port Frame Link Module)'],
+  ['|G|instance_2_GROUP|P06011-B21_7', 'Addons for Synergy Satellite Frame #1', '(HPE Synergy 12000 Configure-to-order Frame with 10x Fans)'],
+  ['|G|instance_2_GROUP|P06011-B21_7|867793-B21_1', '50Gb Interconnect #3', '(HPE Synergy 50Gb Interconnect Link Module)'],
+  ['|G|instance_2_GROUP|P06011-B21_3', 'Addons for Synergy Satellite Frame #2', '(HPE Synergy 12000 Configure-to-order Frame with 10x Fans)'],
+  ['|G|instance_2_GROUP|P06011-B21_3|876852-B21_3', '4-port Frame Link Module #8', '(HPE Synergy 4-port Frame Link Module)'],
+].map(([key, label, description]) => ({ key, label, description }));
+
+test('the other frames are the solution\'s frames, not frame 1 or Frame Link Modules', () => {
+  const frames = otherFrames(tree4, 'P06011-B21', 'Addons for Synergy 4 Frame #1 Group', ['|G|instance_2_GROUP|P06011-B21_1|P68217-B21_1']);
+  expect(frames.map((entry) => entry.label)).toEqual([
+    'Addons for Synergy Master 2 Frame #1', 'Addons for Synergy Satellite Frame #1', 'Addons for Synergy Satellite Frame #2',
+  ]);
+  // A TAA model number (P06011-B22) still finds the frames by their Configure-to-order Frame description.
+  expect(otherFrames(tree4, 'P06011-B22', 'Addons for Synergy 4 Frame #1 Group', ['|G|instance_2_GROUP|P06011-B21_1|P68217-B21_1']))
+    .toHaveLength(3);
+});
+
+test('the next frame\'s server is its own selectable row, not an unavailable copy shown by "Show more"', async ({ page }) => {
+  const withCopy = frameMenu.replace('</tbody></table>', `<tr class="item_tr unavailable extended" id="item_tr_P68217-B21_GTA_bladesSection_blades"
+      data-elementid="bladesSection_blades"><td></td><td class="item_prod"><span class="_pid">P68217-B21</span></td>
+      <td class="item_desc">HPE Synergy 480 Gen12 Configure-to-order Compute Module</td>
+      <td class="item_qty"><div class="item_qty_div">0</div></td></tr></tbody></table>`);
+  await page.setContent(withCopy);
+  await new ComponentEngine(page).addProductInSection('Compute and Storage', 'P68217-B21', 1);
+  await expect(page.locator('#item_tr_P68217-B21_bladesSection_blades .item_qty_div')).toHaveText('1');
+  await expect(page.locator('#item_tr_P68217-B21_GTA_bladesSection_blades .item_qty_div')).toHaveText('0');
 });

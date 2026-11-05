@@ -47,8 +47,25 @@ export async function recoverRequiredMenuSelections(
 const MANDATORY_SECTIONS = ['Processor', 'Memory'];
 const MANDATORY_ONLY: ResolveOptions = { mandatorySections: MANDATORY_SECTIONS };
 
-/** A frame of a multi-frame solution in OCA's navigation ("Addons for Synergy Master 2 Frame #1"). */
+/** A multi-frame solution's description or level names frames ("HPE Synergy 4 Frame Solution"). */
 const FRAME = /\bframe\b/i;
+
+/**
+ * The frames of a multi-frame solution other than frame 1, in tree order. Captured on P06011-B21 (4 Frame,
+ * 2026-11-05): under "Addons for Synergy 4 Frame #1 Group" each frame is keyed by the solution's own part number
+ * (|…|instance_2_GROUP|P06011-B21_1, _5, _7, _3: Master 1, Master 2, Satellite 1, Satellite 2) and described
+ * "(HPE Synergy 12000 Configure-to-order Frame with 10x Fans)"; each frame's parts ("4-port Frame Link Module #1")
+ * sit below it and are not frames. Frame 1 is the frame above the server already configured.
+ */
+export function otherFrames<T extends { key: string; label: string; description: string }>(
+  entries: T[], modelNumber: string, solutionLevel: string, frameOneServers: string[],
+): T[] {
+  const model = modelNumber.trim().toUpperCase();
+  return entries.filter((entry) => (partOfKey(entry.key) === model
+      || (CONFIGURE_TO_ORDER.test(entry.description) && FRAME.test(entry.description)))
+    && entry.label !== solutionLevel && !frameOneServers.includes(entry.key)
+    && !frameOneServers.some((key) => entry.key && key.startsWith(`${entry.key}|`)));
+}
 
 /**
  * The components set on frame 1's server, as instructions that set the same products and quantities on
@@ -309,12 +326,7 @@ export class OcaEngine {
     this.currentStep = 'Find the other frames';
     // OCA's tree keys are paths ("|…|frame|server_1"): frame 1 is every entry above its own server.
     const frameOneServers = [...configured];
-    // A frame's name says Frame ("Addons for Synergy Master 2 Frame #1"), or it is listed under the solution's
-    // own part number (the 4-frame recording opened frame 4 from the P06011-B21 rows).
-    const frames = (await navigation.entries()).filter((entry) => (FRAME.test(`${entry.label} ${entry.description}`)
-      || partOfKey(entry.key) === job.modelNumber.trim().toUpperCase())
-      && entry.label !== solutionLevel && !configured.has(entry.key)
-      && !frameOneServers.some((key) => entry.key && key.startsWith(`${entry.key}|`)));
+    const frames = otherFrames(await navigation.entries(), job.modelNumber, solutionLevel, frameOneServers);
     console.log(`[STEP] Other frames (${frames.length}): ${frames.map((entry) => entry.label).join(', ') || 'none'}`);
     if (copy) console.log(`[INFO] Each frame gets ${server.productNumber} x${server.quantity} with ${copy.map((item) =>
       `${item.section} ${item.productNumber ?? item.configurationText ?? ''}${item.quantity == null ? '' : ` x${item.quantity}`}`).join(', ')}`);

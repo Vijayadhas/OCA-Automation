@@ -604,13 +604,32 @@ export class ComponentEngine {
     }
   }
 
-  /** Sets a product's quantity in the section titled so (the next frame gets the server frame 1 got). */
+  /**
+   * Sets a product's quantity in the section titled so (the next frame gets the server frame 1 got). The row is
+   * the section's own selectable one: on P06011-B21's Master 2 Frame (2026-11-05) a second, unavailable
+   * P68217-B21 row (the TAA list) showed after "Show more", and a page-wide lookup found two. "Show more" is
+   * used only when the product is not listed without it.
+   */
   async addProductInSection(sectionTitle: string, productNumber: string, quantity: number): Promise<void> {
     const section = await this.findSection(sectionTitle);
     if (!section) throw new UnsupportedComponentError(`Section ${sectionTitle} is not offered in this configuration`);
     await this.open(section);
-    await this.showMoreRows();
-    await this.quantities.set(await this.findProductRow(productNumber), productNumber, quantity, false, { acceptOffered: true });
+    const findRow = async () => {
+      for (const choice of (await this.choices(section)).filter((item) => item.rows > 0)) {
+        const rows = (await this.rowInfo(this.choiceRows(choice.id)))
+          .filter((row) => isPickable(row) && row.productNumber.toUpperCase() === productNumber.toUpperCase());
+        const exact = rows.find((row) => row.id === `item_tr_${productNumber}_${choice.id}`) ?? rows[0];
+        if (exact) return this.page.locator(`[id=${JSON.stringify(exact.id)}]`);
+      }
+      return null;
+    };
+    let row = await findRow();
+    if (!row) {
+      await this.showMoreRows();
+      row = await findRow();
+    }
+    if (!row) throw new UnsupportedComponentError(`${productNumber} is not offered in ${section.title} of this configuration`);
+    await this.quantities.set(row, productNumber, quantity, false, { acceptOffered: true });
     console.log(`[STEP] ${section.title}: ${productNumber} x${quantity}`);
   }
 
