@@ -1,6 +1,6 @@
 import { resolveConfigurationErrors, type ResolveOptions } from './configuration-errors';
 import { expect, type BrowserContext, type Page } from '@playwright/test';
-import { countryFor, customerAccountFor, isFrameSolution, searchDescriptionFor, type OcaJob } from '../models/job';
+import { countryFor, customerAccountFor, isFrameSolution, searchDescriptionFor, serviceTypeFor, type OcaJob } from '../models/job';
 import { CustomerAccount } from './customer-account';
 import { Country } from './country';
 import type { AutomationResult } from '../models/automation-result';
@@ -10,7 +10,7 @@ import { safeClick } from '../core/interactions';
 import { ModelSearch } from './model-search';
 import { ComponentEngine, type ExecutionOutcome } from './component-engine';
 import { isBrowserClosedError, MandatorySelectionError } from '../core/errors';
-import { ConfigurationNavigation } from './configuration-navigation';
+import { ConfigurationNavigation, partOfKey } from './configuration-navigation';
 import { getErrorMessage } from '../core/excel';
 import type { ComponentInstruction } from '../models/component-instruction';
 import { BillingTier } from './billing-tier';
@@ -164,7 +164,7 @@ export class OcaEngine {
       for (const section of MANDATORY_SECTIONS) await this.components.mandatorySelection(section);
     }
     this.currentStep = 'Select Support Services';
-    const support = await this.measure('Select Support Services', () => new SupportServices(this.activePage).select(job.serviceType));
+    const support = await this.measure('Select Support Services', () => new SupportServices(this.activePage).select(serviceTypeFor(job)));
     result.serviceExperience = support.serviceExperience;
     result.serviceTerm = support.term;
     result.dataPrivacy = support.dataPrivacy;
@@ -300,7 +300,10 @@ export class OcaEngine {
     this.currentStep = 'Find the other frames';
     // OCA's tree keys are paths ("|…|frame|server_1"): frame 1 is every entry above its own server.
     const frameOneServers = [...configured];
-    const frames = (await navigation.entries()).filter((entry) => FRAME.test(`${entry.label} ${entry.description}`)
+    // A frame's name says Frame ("Addons for Synergy Master 2 Frame #1"), or it is listed under the solution's
+    // own part number (the 4-frame recording opened frame 4 from the P06011-B21 rows).
+    const frames = (await navigation.entries()).filter((entry) => (FRAME.test(`${entry.label} ${entry.description}`)
+      || partOfKey(entry.key) === job.modelNumber.trim().toUpperCase())
       && entry.label !== solutionLevel && !configured.has(entry.key)
       && !frameOneServers.some((key) => entry.key && key.startsWith(`${entry.key}|`)));
     console.log(`[STEP] Other frames (${frames.length}): ${frames.map((entry) => entry.label).join(', ') || 'none'}`);

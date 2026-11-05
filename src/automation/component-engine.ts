@@ -188,6 +188,17 @@ function isPickable(row: RowInfo): boolean {
 /** A product that is a configuration of its own: "HPE Synergy 480 Gen12 Configure-to-order Compute Module". */
 export const CONFIGURE_TO_ORDER = /\bconfigure[- ]to[- ]order\b|\bCTO\b/i;
 
+/** The generation a description names ("HPE Synergy 480 Gen12 ..." -> 12); 0 when none. */
+export function generationOf(description: string): number {
+  return Number(/\bGen\s*(\d+)\b/i.exec(description)?.[1] ?? 0);
+}
+
+/** The candidates of the newest generation named; all of them when none names one. */
+export function newestGeneration<T extends { description: string }>(candidates: T[]): T[] {
+  const newest = Math.max(0, ...candidates.map((candidate) => generationOf(candidate.description)));
+  return newest ? candidates.filter((candidate) => generationOf(candidate.description) === newest) : candidates;
+}
+
 /** Drive kinds a storage model's Storage Devices section is filled with, in this order. */
 export const STORAGE_DRIVE_KINDS: RequiredKind[] = [
   { name: 'HDD', matches: (text) => /\bHDDs?\b|\bhard (?:disk )?drives?\b/i.test(text) },
@@ -523,34 +534,49 @@ export class ComponentEngine {
   /**
    * Frame of a multi-frame solution (HPE Synergy): adds one Configure-to-order product, the server that
    * becomes its own configuration. Excel's Server (part number or description words) names it; else one
-   * random product whose description says Configure-to-order (or CTO) is taken from the Menu's sections.
+   * random product whose description says Configure-to-order (or CTO) is taken from the Menu's sections,
+   * of the newest generation listed ("Gen12" over "Gen9": the 2-frame recording lists both). Rows behind
+   * "Show more" are shown first (4-frame recording). A matching server the frame already has is kept.
    */
   async addConfigureToOrderProduct(requested?: string, quantity = 1): Promise<Selection & { sectionTitle: string }> {
     const wanted = (requested ?? '').trim();
-    const candidates: Array<{ row: Locator; productNumber: string; description: string; choiceId: string; sectionTitle: string }> = [];
+    type Candidate = { row: Locator; productNumber: string; description: string; choiceId: string; sectionTitle: string };
+    const candidates: Candidate[] = [];
+    let kept: (Selection & { sectionTitle: string }) | null = null;
     for (const section of (await this.sections()).filter((item) => item.visible)) {
       await this.open(section);
+      await this.showMoreRows();
       for (const choice of (await this.choices(section)).filter((item) => item.rows > 0)) {
-        for (const row of (await this.rowInfo(this.choiceRows(choice.id))).filter(isPickable)) {
+        for (const row of await this.rowInfo(this.choiceRows(choice.id))) {
           const matches = wanted
             ? row.productNumber.toLowerCase() === wanted.toLowerCase() || mentionsProduct(row.description, wanted)
               || normalize(row.description).includes(normalize(wanted))
             : CONFIGURE_TO_ORDER.test(row.description);
-          if (matches) {
+          if (!matches || !row.productNumber) continue;
+          if (!kept && Number(row.quantity) > 0) {
+            kept = { productNumber: row.productNumber, description: row.description, quantity: Number(row.quantity), sectionTitle: section.title };
+          }
+          if (isPickable(row)) {
             candidates.push({ row: this.page.locator(`[id=${JSON.stringify(row.id)}]`), productNumber: row.productNumber,
               description: row.description, choiceId: choice.id, sectionTitle: section.title });
           }
         }
       }
     }
+    if (kept) {
+      console.log(`[INFO] ${kept.sectionTitle}: ${kept.productNumber} x${kept.quantity} is already in this frame; keeping it (${kept.description})`);
+      return kept;
+    }
     if (!candidates.length) {
       throw new UnsupportedComponentError(wanted
         ? `Server ${wanted} is not offered in this configuration's Menu`
         : 'No Configure-to-order product is offered in this configuration\'s Menu');
     }
-    console.log(`[INFO] Configure-to-order candidates (${candidates.length}): ${candidates.map((item) => `${item.productNumber} (${item.sectionTitle})`).join(', ')}`);
+    const newest = wanted ? candidates : newestGeneration(candidates);
+    console.log(`[INFO] Configure-to-order candidates (${candidates.length}): ${candidates.map((item) => `${item.productNumber} (${item.sectionTitle})`).join(', ')}`
+      + `${newest.length < candidates.length ? `; newest generation: ${newest.map((item) => item.productNumber).join(', ')}` : ''}`);
     const label = wanted ? `Server ${wanted}` : 'Configure-to-order server';
-    const picked = await this.tryRandomCandidates(label, candidates, async (candidate) => {
+    const picked = await this.tryRandomCandidates(label, newest, async (candidate) => {
       const committed = await this.quantities.set(candidate.row, candidate.productNumber, quantity, false, { acceptOffered: true });
       return { productNumber: candidate.productNumber, description: candidate.description, quantity: committed, sectionTitle: candidate.sectionTitle };
     }, REPAIR_CANDIDATE_TRIES);
@@ -558,11 +584,23 @@ export class ComponentEngine {
     return picked;
   }
 
+  /** Clicks OCA's "Show more" links so rows it hides are listed (4-frame recording: "Show more >>"). */
+  private async showMoreRows(): Promise<void> {
+    for (let click = 0; click < 10; click += 1) {
+      const more = this.page.getByText(/^\s*Show more\b/i).filter({ visible: true }).first();
+      if (!await more.isVisible().catch(() => false)) return;
+      console.log('[STEP] Showing more products ("Show more")');
+      await more.click({ force: true });
+      await waitForBlockingOverlay(this.page);
+    }
+  }
+
   /** Sets a product's quantity in the section titled so (the next frame gets the server frame 1 got). */
   async addProductInSection(sectionTitle: string, productNumber: string, quantity: number): Promise<void> {
     const section = await this.findSection(sectionTitle);
     if (!section) throw new UnsupportedComponentError(`Section ${sectionTitle} is not offered in this configuration`);
     await this.open(section);
+    await this.showMoreRows();
     await this.quantities.set(await this.findProductRow(productNumber), productNumber, quantity, false, { acceptOffered: true });
     console.log(`[STEP] ${section.title}: ${productNumber} x${quantity}`);
   }

@@ -43,6 +43,8 @@ export interface ModelPreset {
    * frame count, as several solutions share one part number.
    */
   frames?: boolean;
+  /** Service experience used when the Excel Service Type is blank, Random or Default. */
+  serviceType?: string;
 }
 
 /** Customer Account a Nutanix model is configured under, and the text its search result contains. */
@@ -54,8 +56,16 @@ export const MODEL_PRESETS: Partial<Record<ModelType, ModelPreset>> = {
   'Arcus EMEA': { route: 'Solution', description: 'HPE GreenLake for PC3000 with Alletra Storage MP (Block)', country: 'SAUDI ARABIA' },
   'Alletra 4000': { route: 'Solution', description: 'HPE Alletra Storage Servers' },
   'Alletra 5000': { route: 'Solution', description: 'HPE Alletra 5000' },
-  'Synergy Frame': { route: 'Server', frames: true },
+  // Every Synergy frame recording (2026-11-05) chose Lite and "Enable only lite"; the Service Type column overrides it.
+  'Synergy Frame': { route: 'Server', frames: true, serviceType: 'Lite' },
 };
+
+/** Service experience to select: the Excel Service Type, else the preset's (Synergy Frame: Lite), else random. */
+export function serviceTypeFor(job: Pick<OcaJob, 'serviceType' | 'modelType'>): string {
+  const given = (job.serviceType ?? '').trim();
+  if (given && !/^(random|default)$/i.test(given)) return given;
+  return presetOf(job.modelType)?.serviceType ?? given;
+}
 
 /** True for a multi-frame solution: the same server in every frame (Model Type Synergy Frame). */
 export function isFrameSolution(job: Pick<OcaJob, 'modelType'>): boolean {

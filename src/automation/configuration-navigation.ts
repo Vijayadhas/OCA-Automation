@@ -4,6 +4,13 @@ import type { PageSnapshot } from '../reporting/html-capture';
 
 const clean = (value: string) => value.replace(/\s+/g, ' ').trim();
 
+/** The part number a tree key ends in: "|…|P53921-B21#GTA_57" -> "P53921-B21"; "" when it has none. */
+export function partOfKey(key: string): string {
+  const last = key.split('|').filter(Boolean).pop() ?? '';
+  const match = /^(.+?)(?:#[^_]*)?_\d+$/.exec(last);
+  return match ? match[1].toUpperCase() : '';
+}
+
 /** A configuration listed in OCA's navigation tree. */
 export interface NavigationEntry { key: string; label: string; description: string }
 
@@ -68,7 +75,18 @@ export class ConfigurationNavigation {
   async open(entry: NavigationEntry): Promise<void> {
     await this.expand();
     const item = this.page.locator(`.eo_popup_tree .popup_tree_item[key=${JSON.stringify(entry.key)}]`).first();
-    await expect(item, `Navigation entry ${entry.label}`).toBeVisible({ timeout: 30_000 });
+    await expect(item, `Navigation entry ${entry.label}`).toBeAttached({ timeout: 30_000 });
+    // An entry under a collapsed branch is in the tree but not shown (the 4-frame recording reached frame 4
+    // another way); a DOM click still opens it.
+    if (!await item.isVisible({ timeout: 10_000 }).catch(() => false)) {
+      console.log(`[STEP] Opening ${entry.label} (not shown in the tree; clicking it directly)`);
+      await item.locator(':scope > .label').first().evaluate((element) => (element as HTMLElement).click())
+        .catch(() => item.evaluate((element) => (element as HTMLElement).click()));
+      await waitForBlockingOverlay(this.page);
+      await expect(this.page.locator('li.eo_nav_li.current').first(), `${entry.label} should be the open configuration`)
+        .toContainText(entry.label, { timeout: 60_000 });
+      return;
+    }
     console.log(`[STEP] Opening ${entry.label}${entry.description ? ` ${entry.description}` : ''}`);
     const label = item.locator(':scope > .label').first();
     const target = await label.isVisible().catch(() => false) ? label : item;

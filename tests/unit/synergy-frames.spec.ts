@@ -1,9 +1,10 @@
 import { test, expect } from '@playwright/test';
 import { pickDescribedOption } from '../../src/automation/model-search';
-import { ComponentEngine } from '../../src/automation/component-engine';
+import { ComponentEngine, generationOf, newestGeneration } from '../../src/automation/component-engine';
+import { partOfKey } from '../../src/automation/configuration-navigation';
 import { copyOfSelections } from '../../src/automation/oca-engine';
 import { ExcelValidator } from '../../src/excel/excel-validator';
-import { isFrameSolution, type OcaJob } from '../../src/models/job';
+import { isFrameSolution, serviceTypeFor, type OcaJob } from '../../src/models/job';
 import { prepareRunJobs } from '../../src/app/run-workbook';
 import { menuSection } from './oca-menu-fixture';
 
@@ -54,11 +55,11 @@ const frameMenu = menuSection({ key: 'bladesSection', title: 'Compute and Storag
 
 const quantity = (page: import('@playwright/test').Page, pid: string) => page.locator(`[id^="item_tr_${pid}_"] .item_qty_div`).textContent();
 
-test('frame 1 gets one random Configure-to-order server, nothing else', async ({ page }) => {
+test('frame 1 gets one random Configure-to-order server of the newest generation, nothing else', async ({ page }) => {
   await page.setContent(frameMenu);
   const server = await new ComponentEngine(page).addConfigureToOrderProduct();
-  expect(['P68217-B21', 'P99999-B21']).toContain(server.productNumber);
-  expect(server).toMatchObject({ quantity: 1, sectionTitle: 'Compute and Storage' });
+  // Gen12 over Gen11 (the 2-frame recording lists an older Synergy 480 beside P68217-B21).
+  expect(server).toMatchObject({ productNumber: 'P68217-B21', quantity: 1, sectionTitle: 'Compute and Storage' });
   expect(await quantity(page, server.productNumber)).toBe('1');
   expect(await quantity(page, 'R0Q01A')).toBe('0');
   expect(await quantity(page, 'IC-1')).toBe('0');
@@ -93,4 +94,43 @@ test('frame 1\'s picks become the same products and quantities for every other f
     ['Drive Cage', 'quantity', 'P68218-B21', 1],
     ['Smart Chassis', 'configuration', undefined, undefined],
   ]);
+});
+
+test('a server frame 1 already has is kept, not added again', async ({ page }) => {
+  await page.setContent(menuSection({ key: 'bladesSection', title: 'Compute and Storage', choices: [
+    { id: 'bladesSection_blades', title: 'Compute and Storage', rows: [
+      { pid: 'P68217-B21', description: 'HPE Synergy 480 Gen12 Configure-to-order Compute Module', quantity: 1, select: [0, 1, 2] },
+      { pid: 'P99998-B21', description: 'HPE Synergy 660 Gen12 Configure-to-order Compute Module', select: [0, 1, 2] },
+    ] },
+  ] }));
+  const server = await new ComponentEngine(page).addConfigureToOrderProduct();
+  expect(server).toMatchObject({ productNumber: 'P68217-B21', quantity: 1 });
+  expect(await quantity(page, 'P99998-B21')).toBe('0');
+});
+
+test('servers behind "Show more" are listed before one is picked', async ({ page }) => {
+  const hidden = frameMenu.replace('id="item_tr_P68217-B21_bladesSection_blades"', 'id="item_tr_P68217-B21_bladesSection_blades" style="display:none"');
+  await page.setContent(`${hidden}<span onclick="document.getElementById('item_tr_P68217-B21_bladesSection_blades').style.display = '';
+    this.textContent = 'Show less <<'">Show more >></span>`);
+  expect((await new ComponentEngine(page).addConfigureToOrderProduct('P68217-B21')).productNumber).toBe('P68217-B21');
+  expect(await quantity(page, 'P68217-B21')).toBe('1');
+});
+
+test('reads generations and tree key part numbers', () => {
+  expect(generationOf('HPE Synergy 480 Gen12 Configure-to-order Compute Module')).toBe(12);
+  expect(generationOf('HPE Synergy 480 Gen9 Configure-to-order Compute Module')).toBe(9);
+  expect(generationOf('HPE Synergy D3940 Storage Module')).toBe(0);
+  expect(newestGeneration([{ description: 'A Gen9' }, { description: 'B Gen12' }, { description: 'C Gen12' }]).map((item) => item.description))
+    .toEqual(['B Gen12', 'C Gen12']);
+  expect(newestGeneration([{ description: 'No generation' }])).toHaveLength(1);
+  expect(partOfKey('|OCA_1|instance_2_GROUP|P06011-B21_3')).toBe('P06011-B21');
+  expect(partOfKey('|…|ZU715A_1|P53921-B21#GTA_57')).toBe('P53921-B21');
+  expect(partOfKey('|root')).toBe('');
+});
+
+test('Synergy Frame selects Lite unless the Service Type column names another', () => {
+  expect(serviceTypeFor(job({ modelType: 'Synergy Frame', serviceType: 'Random' }))).toBe('Lite');
+  expect(serviceTypeFor(job({ modelType: 'Synergy Frame', serviceType: '' }))).toBe('Lite');
+  expect(serviceTypeFor(job({ modelType: 'Synergy Frame', serviceType: 'Standard' }))).toBe('Standard');
+  expect(serviceTypeFor(job({ modelType: 'Server', serviceType: 'Random' }))).toBe('Random');
 });

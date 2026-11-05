@@ -36,13 +36,15 @@ export class SupportServices {
     const requestedExperience = preferredExperience && !/^(random|default)$/i.test(preferredExperience)
       ? preferredExperience.trim()
       : undefined;
+    // A random pick stays within the usual experiences; one Excel names (Lite, for Synergy frames) is any OCA offers.
     const serviceExperience = await this.selectEnabledOption(
       support.locator('#service-experience'),
       'Service experience',
-      (value) => (ALLOWED_SERVICE_EXPERIENCE_VALUES as readonly string[]).includes(value),
+      (value) => Boolean(requestedExperience) || (ALLOWED_SERVICE_EXPERIENCE_VALUES as readonly string[]).includes(value),
       requestedExperience,
     );
     await waitForBlockingOverlay(this.page);
+    if (/^lite$/i.test(serviceExperience)) await this.enableOnlyLite();
 
     const term = await this.selectEnabledOption(support.locator('#term'), 'Term');
     await waitForBlockingOverlay(this.page);
@@ -61,6 +63,27 @@ export class SupportServices {
       }
     }
     return { serviceExperience, term, dataPrivacy };
+  }
+
+  /**
+   * With Lite, OCA offers "Enable only lite" (HPE Synergy frame recordings, 2026-11-05: ticked every time
+   * after Lite, so the solution's frames and servers take Lite too). Ticked when shown and not yet ticked.
+   */
+  private async enableOnlyLite(): Promise<void> {
+    const label = this.page.locator('label').filter({ visible: true, hasText: /Enable only lite/i }).first();
+    if (!await label.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      console.log('[INFO] OCA shows no "Enable only lite" option; continuing');
+      return;
+    }
+    const box = label.locator('input[type="checkbox"]').first();
+    if (await box.count() && await box.isChecked().catch(() => false)) {
+      console.log('[INFO] "Enable only lite" is already ticked');
+      return;
+    }
+    console.log('[STEP] Ticking "Enable only lite"');
+    const target = label.locator('span').first();
+    await (await target.isVisible().catch(() => false) ? target : label).click({ force: true });
+    await waitForBlockingOverlay(this.page);
   }
 
   private async selectEnabledOption(

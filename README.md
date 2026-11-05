@@ -74,7 +74,9 @@ Several share one part number (P06011-B21 is the 2, 3 and 4 Frame Solution), so 
 picks the search result (spacing and letter case do not matter; an exact match wins). Frame 1 gets the `Server`
 column's product (part number or description words), else a random Configure-to-order product; that server's own
 configuration gets Processor, Memory and Drive Cage (Excel or random). Every other frame in OCA's navigation gets the
-same server with the same products and quantities. Services, Billing Tier, Save and End BOM follow as for any model.
+same server with the same products and quantities. Services default to Lite with "Enable only lite" (as recorded; the
+Service Type column overrides it). A random server is of the newest generation listed. Billing Tier, Save and End BOM
+follow as for any model.
 
 `Model Type` `Nutanix` is a server sold to the Nutanix customer account: before the search, Customer
 Account is set to `Nutanix` in the landing page's Advanced Settings, and the search result containing
