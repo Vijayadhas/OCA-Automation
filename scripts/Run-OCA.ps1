@@ -113,6 +113,31 @@ function Load-Configuration {
     }
 }
 
+# Chrome or Edge, where Playwright looks for them on Windows: the automation uses Chrome, then Edge, and
+# needs Playwright's own Chromium only when neither is installed.
+function Test-InstalledBrowser {
+    $roots = @($env:LOCALAPPDATA, ${env:ProgramFiles(x86)}, $env:ProgramFiles) | Where-Object { $_ }
+    foreach ($root in $roots) {
+        foreach ($exe in @('Google\Chrome\Application\chrome.exe', 'Microsoft\Edge\Application\msedge.exe')) {
+            if (Test-Path -LiteralPath (Join-Path $root $exe)) { return $true }
+        }
+    }
+    return $false
+}
+
+# Playwright's Chromium is a fallback. An office network often blocks its download; with Chrome or Edge
+# installed that is only a warning.
+function Install-PlaywrightChromium {
+    Write-Host 'Installing the Playwright Chromium browser (first run only)...' -ForegroundColor Yellow
+    & npx.cmd playwright install chromium
+    if ($LASTEXITCODE -eq 0) { return }
+    if (Test-InstalledBrowser) {
+        Write-Host "[WARN] Playwright Chromium could not be downloaded (exit code $LASTEXITCODE). Google Chrome or Microsoft Edge is installed and will be used; continuing." -ForegroundColor Yellow
+        return
+    }
+    throw "Playwright Chromium could not be downloaded (exit code $LASTEXITCODE), and neither Google Chrome nor Microsoft Edge is installed. Install Google Chrome, or ask IT to allow the download, then run this launcher again."
+}
+
 function Confirm-Prerequisites {
     if (-not (Get-Command node.exe -ErrorAction SilentlyContinue)) {
         throw 'Node.js is not installed or is not on PATH. Install the Node.js LTS release, then run this launcher again.'
@@ -126,9 +151,7 @@ function Confirm-Prerequisites {
         & npm.cmd ci
         if ($LASTEXITCODE -ne 0) { throw "npm install failed with exit code $LASTEXITCODE." }
 
-        Write-Host 'Installing the Playwright Chromium browser (first run only)...' -ForegroundColor Yellow
-        & npx.cmd playwright install chromium
-        if ($LASTEXITCODE -ne 0) { throw "Playwright browser installation failed with exit code $LASTEXITCODE." }
+        Install-PlaywrightChromium
         Set-Content -LiteralPath $SetupMarkerPath -Value 'Setup completed successfully.' -Encoding ASCII
     }
 }

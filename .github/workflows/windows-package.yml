@@ -34,6 +34,17 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      - name: Parse every PowerShell script (Windows PowerShell 5.1)
+        shell: powershell
+        run: |
+          $failed = $false
+          foreach ($file in Get-ChildItem -Path scripts, installer -Filter *.ps1 -Recurse) {
+            $tokens = $null; $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors) { $failed = $true; $errors | ForEach-Object { Write-Host "::error file=$($file.Name)::$($_.Message) (line $($_.Extent.StartLineNumber))" } }
+            else { Write-Host "OK $($file.Name)" }
+          }
+          if ($failed) { throw 'PowerShell syntax errors' }
       - run: npx playwright install chromium
       # The github reporter turns each failure into an annotation, readable without the full log.
       - run: npm run test:unit -- --reporter=list,github
