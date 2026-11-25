@@ -1,8 +1,6 @@
 # Builds the Windows package (Setup.cmd + OCA.exe + bundled Node.js) on every push, checks it by
 # installing it and starting a run through the installed OCA.exe, and publishes it as a release:
-#   main               -> release "OCA Automation for Windows" (tag windows-package); the download link
-#                         https://github.com/Vijayadhas/OCA-Automation/releases/latest/download/OCA-Automation-Windows.zip
-#                         always gives the newest build
+#   main               -> release "OCA Automation for Windows" (tag windows-package), always the newest build
 #   feature/* branches -> pre-release "preview-<branch>", for testing before the branch is merged
 name: Windows package
 

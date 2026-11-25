@@ -17,11 +17,10 @@ Users do not need Node.js, npm or Git. Every push builds a Windows package on Gi
 starts the dashboard and opens it in the browser. The build installs the package on a Windows machine
 and starts one run through the installed `OCA.exe` before publishing it.
 
-- Download: [OCA-Automation-Windows.zip](https://github.com/Vijayadhas/OCA-Automation/releases/latest/download/OCA-Automation-Windows.zip)
-  (newest build of `main`; a `feature/*` branch publishes a pre-release named `preview-<branch>`).
+- Package: `OCA-Automation-Windows.zip`, the newest build of `main` (a `feature/*` branch builds a
+  pre-release named `preview-<branch>`). Users receive it from the project owner, with the installation guide.
 - Extract it and run `Setup.cmd`. It checks the computer first (Windows, package files, whether
-  `node.exe` and `OCA.exe` may run, Chrome or Edge, free space, the OCA website, GitHub, the dashboard
-  port), lists each check as PASS, WARN or FAIL, and saves `system-check.txt`. A FAIL stops the
+  `node.exe` and `OCA.exe` may run, Chrome or Edge, free space, the OCA website, the dashboard port), lists each check as PASS, WARN or FAIL, and saves `system-check.txt`. A FAIL stops the
   installation; `Check-System.cmd` runs only the checks.
 - Installs per user, without administrator rights: the app in `%LOCALAPPDATA%\Programs\OCA-Automation`,
   and the user's runs, browser profiles and `settings.txt` in `%LOCALAPPDATA%\OCA-Automation`, which

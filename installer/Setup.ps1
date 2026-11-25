@@ -234,12 +234,6 @@ function Invoke-SystemCheck {
         else { Add-Result 'OCA website' 'WARN' ('{0}: {1}' -f $hostName, $reach.Detail) 'Connect to the HPE network or VPN before running automation. Installation can continue.' }
     }
 
-    Invoke-Check 'GitHub (updates)' {
-        $reach = Test-WebAddress 'https://github.com/Vijayadhas/OCA-Automation/releases'
-        if ($reach.Reached) { Add-Result 'GitHub (updates)' 'PASS' ('github.com answered: {0}' -f $reach.Detail) }
-        else { Add-Result 'GitHub (updates)' 'WARN' ('github.com not reachable: {0}' -f $reach.Detail) 'New versions must then be copied to this computer another way.' }
-    }
-
     Invoke-Check 'Dashboard port' {
         $port = [int](Get-Setting 'OCA_UI_PORT' '4173')
         $listener = $null

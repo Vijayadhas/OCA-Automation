@@ -56,7 +56,7 @@ search description and Country when the Excel cells are blank. A new model famil
 Entry points: `npm run oca` (CLI, `src/main.ts`) and `npm run ui` (web dashboard on port 4173,
 `src/app/ui-server.ts`). On Windows the user runs `Run-OCA.cmd` / `Run-OCA-UI.cmd`.
 
-Repository: https://github.com/Vijayadhas/OCA-Automation (branch `main`).
+Repository branch: `main`.
 
 ## 2. How the user works (important)
 
